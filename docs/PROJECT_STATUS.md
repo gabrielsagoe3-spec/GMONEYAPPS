@@ -1,41 +1,26 @@
-# Job agent: ownership and next steps
+# G Money Job Agent status
 
-## The agreement
-The assistant researches opportunities, evaluates fit, prepares and (where supported) submits applications, and publishes a breakdown. The user gives preferences and supplies missing personal answers. The dashboard is an overview of the assistant's work; it must not require manual job entry.
+The assistant researches opportunities and records findings; the user supplies preferences and missing personal answers. Manual job entry is not required.
 
-## Working today
-- Assistant-published research report served from Supabase `published_research_reports`, with employer source URLs, check dates, decisions, fit assessments and next actions.
-- Website overview, research filters, application-status explanation, connection status and browser-local preferences.
-- Source on GitHub. Published report can be read on phone or laptop; local preferences do not sync.
+## Implemented
 
-## Not working yet
-- No continuous background research, AI backend, form-filling worker, submission integration, Gmail reader, SMS delivery or MCP server is running.
-- Supabase private-account sign-in and preference sync are not implemented. The Supabase dashboard account does not automatically sign the user into this website.
-- Candidate resumes, contact details, secret API keys and provider credentials must not be committed to this repository.
+- Static dashboard with overview, research, Automation, applications, private-profile and connection tabs.
+- Public published research read from Supabase. The existing report contains seven previously researched entries; it is not an automated run.
+- Research worker for six configured employer feeds, transparent rule-based screening and sponsorship evidence, source failures, retrieval timestamps and deduplication.
+- Restricted report publication endpoint, private report archive and scoped credential provisioning script.
+- Prepared GitHub Actions workflow for manual research and an opt-in six-hour schedule.
+- Email-code sign-in and private profile form for résumé text, titles, locations, minimum salary and sponsorship needs.
 
-## Organization
-- `index.html`: site shell
-- `assets/`: presentation and frontend logic
-- `data/research.json`: published research snapshot containing public job information only
-- `supabase/migrations/`: applied initial schema source
-- `docs/`: product agreement and implementation status
+## Verified on the existing Supabase project
 
-## Supabase connection (November 2, 2026)
-Project `gmoney-job-agent` (`awscnughpnerhkslhmln`) was created in the user-selected existing organization on the quoted $0/month setup, us-east-2.
+Private-profile fields and research-publication function are installed. Live transaction tests passed for owner reads/writes, cross-account isolation, anonymous denial, ownership protection, worker authorization, idempotency, stale-run rejection, validation and archival. All synthetic test changes were rolled back. Code email templates are configured; delivery has not been tested. No custom SMTP is configured.
 
-The initial schema is applied. It contains agent_preferences, research_runs, job_findings, application_records and published_research_reports. The browser reads the public-information report with a publishable key. No secret key is in the frontend. Only public job research belongs in the published report; private candidate information must use user-owned tables.
+## Not activated or unverified
 
-The assistant can update the current report through the authorized Supabase connection. The website loads the latest report on opening or Refresh report, without a code deployment. The research date remains October 30; connecting the database is not a new job-research pass.
+- Employer feeds are blocked by environment proxy policy until the saved network additions are applied. No real automated research run has yet completed or been published.
+- The new frontend and workflow are local changes awaiting release; GitHub Pages currently serves main/root.
+- GitHub Actions secret management is denied to the current integration. A repository administrator must add the separately provisioned worker credential. No scheduled worker is enabled.
+- Browser profile and automation tests use mocked API responses. Live email delivery and cross-device sign-in remain unverified.
+- Matching uses public criteria in automation/config.json, not private résumé analysis. No application submission, continuous AI research, Gmail reader, SMS delivery, storage bucket, or LinkedIn/Indeed account integration is running.
 
-Test transactions verified owner-only preference visibility, owner updates, rejection of ownership reassignment, denial of anonymous private reads and denial of client-forged application submissions. Test users and rows were rolled back. Security advisors reported no findings. Frontend reading is tested separately via the public REST endpoint.
-
-Next: implement account sign-in and private preference sync, then private resume storage and application workflow. Local preferences do NOT sync yet. No storage bucket or continuous agent exists yet.
-
-## Application phase
-Verify a role is current and eligible, resolve missing profile information, prepare truthful answers and documents, test one authorized employer integration, and preserve actual submission confirmations with duplicate prevention. Human assessments remain for the candidate to complete. LinkedIn access must not be assumed from the existence of an MCP connection.
-
-## Morning briefing (future)
-Summarize relevant Gmail recruiter replies, interview requests, deadlines and next steps. Time and delivery method (SMS versus ChatGPT notification) remain unresolved; no schedule configured.
-
-## Validation limits
-Frontend script syntax and report consistency checked. Initial migration applied; access-policy assertions and security advisors passed. No actual job application or outreach was sent during this research pass.
+See [AUTOMATION.md](AUTOMATION.md) for commands, activation and exact limitations. See [PRIVATE_PROFILE_SETUP.md](PRIVATE_PROFILE_SETUP.md) for account setup. Candidate contact information, secret keys and private résumés must stay out of source control and public reports.

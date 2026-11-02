@@ -1,0 +1,3 @@
+latest-report.json
+*.lock
+__pycache__/

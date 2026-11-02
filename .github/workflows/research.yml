@@ -1,0 +1,36 @@
+name: Job research
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: gmoney-job-research
+  cancel-in-progress: false
+jobs:
+  research:
+    # Scheduled execution requires an explicit repository-variable opt-in.
+    if: github.event_name == 'workflow_dispatch' || vars.GMONEY_AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test worker and publisher
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Load previous public research for deduplication
+        run: python3 automation/fetch_previous.py automation/previous-report.json
+      - name: Research current employer feeds
+        env:
+          GMONEY_TRIGGER: ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
+        run: python3 automation/research_worker.py --once --trigger "$GMONEY_TRIGGER" --previous automation/previous-report.json
+      - name: Preserve public research artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-research-${{ github.run_id }}
+          path: automation/latest-report.json
+          retention-days: 14
+      - name: Publish through the restricted research endpoint
+        env:
+          GMONEY_RESEARCH_KEY: ${{ secrets.GMONEY_RESEARCH_KEY }}
+        run: python3 automation/publish_report.py automation/latest-report.json

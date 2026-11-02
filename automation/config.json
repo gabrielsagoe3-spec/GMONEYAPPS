@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "criteria": {
+    "label": "Entry-level business and operations analyst research",
+    "role_patterns": [
+      "business analyst", "operations analyst", "business operations",
+      "financial analyst", "strategy analyst", "management analyst",
+      "consulting analyst", "associate consultant", "project analyst",
+      "program analyst", "process analyst", "pricing analyst",
+      "commercial analyst", "supply chain analyst", "reporting analyst",
+      "data analyst", "risk analyst", "operations associate"
+    ],
+    "preferred_locations": ["Houston"],
+    "country": "US",
+    "entry_level": true,
+    "sponsorship_required": true,
+    "start_window": "Full-time after May 2027; this preference still needs confirmation",
+    "minimum_salary_usd": null
+  },
+  "max_records": 30,
+  "max_excluded": 5,
+  "sources": [
+    {"provider": "greenhouse", "board": "sofi", "name": "SoFi"},
+    {"provider": "greenhouse", "board": "affirm", "name": "Affirm"},
+    {"provider": "greenhouse", "board": "datadog", "name": "Datadog"},
+    {"provider": "greenhouse", "board": "hubspot", "name": "HubSpot"},
+    {"provider": "lever", "board": "palantir", "name": "Palantir"},
+    {"provider": "lever", "board": "wealthfront", "name": "Wealthfront"}
+  ]
+}
