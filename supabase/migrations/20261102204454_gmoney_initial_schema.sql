@@ -1,4 +1,4 @@
--- Prepared migration; NOT applied to any Supabase project.
+-- Initial schema for G Money Job Agent.
 -- Research and application records are written only by a trusted backend.
 begin;
 create table public.agent_preferences (
@@ -66,4 +66,18 @@ create policy applications_read on public.application_records for select to auth
 create index research_runs_owner on public.research_runs(user_id);
 create index job_findings_owner on public.job_findings(user_id);
 create index application_records_owner on public.application_records(user_id);
+
+-- Published reports contain public job information only, never private candidate data.
+create table public.published_research_reports (
+  slug text primary key,
+  report jsonb not null check (jsonb_typeof(report) = 'object'),
+  published_at timestamptz not null default now()
+);
+alter table public.published_research_reports enable row level security;
+revoke all on public.published_research_reports from anon, authenticated;
+grant select on public.published_research_reports to anon, authenticated;
+grant all on public.published_research_reports to service_role;
+create policy published_reports_read on public.published_research_reports
+for select to anon, authenticated using (true);
+
 commit;

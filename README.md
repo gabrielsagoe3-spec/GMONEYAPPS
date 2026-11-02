@@ -1,7 +1,7 @@
 # G Money Job Agent
 
-An assistant-managed research dashboard. The assistant finds and evaluates jobs; the user supplies direction rather than entering jobs manually.
+Assistant-managed job research. The user gives direction; the assistant researches and records findings.
 
-Serve this directory over HTTP (for example, `python3 -m http.server 8000`). The report is loaded from `data/research.json`; opening index.html via file:// may block that request.
+The website reads published research from Supabase with a browser-safe publishable key. Private tables are created with RLS. Private account login and preference sync are not implemented yet. Preferences remain browser-local.
 
-See docs/PROJECT_STATUS.md for scope, data organization, what is working and the remaining Supabase/agent setup. This release is a published research snapshot, not a continuously running job application agent.
+Serve the site over HTTP. On GitHub the site files are at repository root. See docs/PROJECT_STATUS.md for setup and verification status. No continuous job-search or application agent is running.
