@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import {boundedJson,createHandler,geography,invocationSignature,verifyInvocation,parseFeed,plainText,ResearchError,runResearch,safeUrl,screenJob,sponsorshipEvidence,validateConfig} from '../supabase/functions/gmoney-research/index.ts';
 
-const config=()=>({version:1,criteria:{label:'Business roles',country:'US',entry_level:true,sponsorship_required:true,preferred_locations:['Houston'],role_patterns:['business analyst','operations coordinator','customer success','staff accountant'],start_window:'Available June 2027 onward'},max_records:30,max_excluded:5,sources:[{provider:'greenhouse',board:'example',name:'Example Employer'}]});
+const config=()=>({version:1,criteria:{label:'Business roles',country:'US',entry_level:true,sponsorship_required:true,sponsorship_requirement_note:'Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.',preferred_locations:['Houston'],role_patterns:['business analyst','operations coordinator','customer success','staff accountant'],start_window:'Available June 2027 onward'},max_records:30,max_excluded:5,sources:[{provider:'greenhouse',board:'example',name:'Example Employer'}]});
 const row=(extra={})=>({id:1,title:'Business Analyst',absolute_url:'https://example.com/jobs/1',location:{name:'Houston, TX'},content:'<p>Organize operations with Excel.</p>',...extra});
 const feed=rows=>new Response(JSON.stringify({jobs:rows}),{headers:{'Content-Type':'application/json'}});
 const env=()=>({SUPABASE_URL:'https://example.supabase.co',GMONEY_PUBLISHABLE_KEY:'public-test-key',GMONEY_RESEARCH_KEY:'publisher-test-key-with-long-random-like-content',GMONEY_RESEARCH_TRIGGER_KEY:'trigger-test-key-with-long-random-like-content',GMONEY_RESEARCH_CONFIG:JSON.stringify(config())});
@@ -32,6 +32,33 @@ test('sponsorship negatives and contradictions remain conservative',()=>{
  assert.equal(sponsorshipEvidence('We do not offer visa sponsorship, but visa sponsorship is available for a separate role.').status,'unknown');
  assert.equal(sponsorshipEvidence('We offer visa sponsorship for eligible roles.').status,'mentioned');
  assert.equal(sponsorshipEvidence('We evaluate applications fairly.').status,'unknown');
+});
+
+test('OPT/CPT acceptance does not establish future H-1B sponsorship',()=>{
+ for(const phrase of ['We accept candidates with valid OPT or CPT.','No sponsorship required during OPT.','No visa sponsorship is needed while on STEM OPT.','No sponsorship is required during CPT.']){
+  const job=parseFeed(config().sources[0],{jobs:[row({content:phrase})]}).jobs[0];
+  const record=screenJob(job,config().criteria,'2026-11-02');
+  assert.equal(record.sponsorshipStatus,'unknown',phrase);assert.equal(record.category,'verify');assert.equal(record.verificationRequired,true);
+  assert.match(record.next,/verify initial OPT\/CPT acceptance for the role and work dates/);assert.match(record.next,/future H-1B sponsorship/);
+ }
+});
+
+test('explicit H-1B sponsorship offers still require verification',()=>{
+ for(const phrase of ['We offer H-1B sponsorship for eligible roles.','H1B sponsorship is available.','We sponsor H-1B visas.','No sponsorship required during OPT, but we offer H1B sponsorship.']){
+  const job=parseFeed(config().sources[0],{jobs:[row({content:phrase})]}).jobs[0];
+  const record=screenJob(job,config().criteria,'2026-11-02');
+  assert.equal(record.sponsorshipStatus,'mentioned',phrase);assert.equal(record.category,'verify');assert.equal(record.verificationRequired,true);
+  assert.deepEqual(record.sponsorshipEvidence,[phrase]);
+ }
+});
+
+test('explicit H-1B sponsorship denials are excluded',()=>{
+ for(const phrase of ['No H-1B sponsorship.','We do not offer H1B sponsorship.','We do not sponsor H-1B visas.','H-1B sponsorship is not available.','No sponsorship required during OPT; future H-1B sponsorship is not available.']){
+  const job=parseFeed(config().sources[0],{jobs:[row({content:phrase})]}).jobs[0];
+  const record=screenJob(job,config().criteria,'2026-11-02');
+  assert.equal(record.sponsorshipStatus,'not_offered',phrase);assert.equal(record.category,'excluded');assert.deepEqual(record.sponsorshipEvidence,[phrase]);
+ }
+ for(const phrase of ['H-1B sponsorship is not guaranteed.','We do not offer H-1B sponsorship, but H1B sponsorship is available for other roles.'])assert.equal(sponsorshipEvidence(phrase).status,'unknown',phrase);
 });
 
 test('business relevance, seniority and location prevent misleading leads',()=>{
@@ -66,6 +93,8 @@ test('research deduplicates stable jobs and labels only truly new records',async
  assert.equal(result.records[0].verificationRequired,true);
  assert.equal(result.records[0].category,'verify');
  assert.match(result.records[0].fit,/No candidate résumé was evaluated/);
+ assert.ok(result.scope.includes(c.criteria.sponsorship_requirement_note));
+ assert.equal('sponsorship_requirement_note' in result.records[0],false);
 });
 
 test('complete failures and empty partial coverage never yield a replacement report',async()=>{

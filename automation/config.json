@@ -117,6 +117,7 @@
     "country": "US",
     "entry_level": true,
     "sponsorship_required": true,
+    "sponsorship_requirement_note": "Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.",
     "start_window": "Available for full-time work from June 2027 onward",
     "minimum_salary_usd": null,
     "available_from": "2027-06-01"

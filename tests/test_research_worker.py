@@ -25,6 +25,7 @@ def config():
             "label": "Entry-level analyst work", "role_patterns": ["business analyst", "operations analyst"],
             "preferred_locations": ["Houston"], "country": "US", "entry_level": True,
             "sponsorship_required": True, "start_window": "After May 2027, unconfirmed",
+            "sponsorship_requirement_note": "Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.",
         },
         "max_records": 30, "max_excluded": 5, "sources": [dict(GH)],
     }
@@ -95,6 +96,8 @@ class ScreeningTests(unittest.TestCase):
         self.assertEqual(criteria["available_from"], "2027-06-01")
         self.assertNotIn("unconfirmed", criteria["start_window"].lower())
         self.assertTrue(criteria["sponsorship_required"])
+        self.assertIn("valid OPT/CPT where applicable", criteria["sponsorship_requirement_note"])
+        self.assertIn("future H-1B sponsorship is required", criteria["sponsorship_requirement_note"])
         self.assertEqual(criteria["preferred_locations"], ["Houston"])
 
     def test_broad_business_search_does_not_select_technical_or_senior_roles(self):
@@ -148,6 +151,55 @@ class ScreeningTests(unittest.TestCase):
         mixed = "We cannot provide visa sponsorship here, but visa sponsorship is available for other roles."
         self.assertEqual(worker.sponsorship_evidence(mixed)["status"], "unknown")
 
+    def test_opt_cpt_acceptance_does_not_establish_future_h1b_sponsorship(self):
+        for phrase in [
+            "We accept candidates with valid OPT or CPT.",
+            "No sponsorship required during OPT.",
+            "No visa sponsorship is needed while on STEM OPT.",
+            "No sponsorship is required during CPT.",
+        ]:
+            with self.subTest(phrase=phrase):
+                record = worker.screen_job(job(content=phrase), config()["criteria"], NOW)
+                self.assertEqual(record["sponsorshipStatus"], "unknown")
+                self.assertEqual(record["category"], "verify")
+                self.assertTrue(record["verificationRequired"])
+                self.assertIn("verify initial OPT/CPT acceptance for the role and work dates", record["next"])
+                self.assertIn("future H-1B sponsorship", record["next"])
+
+    def test_explicit_h1b_sponsorship_offers_still_require_verification(self):
+        for phrase in [
+            "We offer H-1B sponsorship for eligible roles.",
+            "H1B sponsorship is available.",
+            "We sponsor H-1B visas.",
+            "No sponsorship required during OPT, but we offer H1B sponsorship.",
+        ]:
+            with self.subTest(phrase=phrase):
+                record = worker.screen_job(job(content=phrase), config()["criteria"], NOW)
+                self.assertEqual(record["sponsorshipStatus"], "mentioned")
+                self.assertEqual(record["category"], "verify")
+                self.assertTrue(record["verificationRequired"])
+                self.assertEqual(record["sponsorshipEvidence"], [phrase])
+
+    def test_explicit_h1b_sponsorship_denials_are_excluded(self):
+        for phrase in [
+            "No H-1B sponsorship.",
+            "We do not offer H1B sponsorship.",
+            "We do not sponsor H-1B visas.",
+            "H-1B sponsorship is not available.",
+            "No sponsorship required during OPT; future H-1B sponsorship is not available.",
+        ]:
+            with self.subTest(phrase=phrase):
+                record = worker.screen_job(job(content=phrase), config()["criteria"], NOW)
+                self.assertEqual(record["sponsorshipStatus"], "not_offered")
+                self.assertEqual(record["category"], "excluded")
+                self.assertEqual(record["sponsorshipEvidence"], [phrase])
+        for phrase in [
+            "H-1B sponsorship is not guaranteed.",
+            "We do not offer H-1B sponsorship, but H1B sponsorship is available for other roles.",
+        ]:
+            with self.subTest(phrase=phrase):
+                self.assertEqual(worker.sponsorship_evidence(phrase)["status"], "unknown")
+
     def test_senior_intern_and_required_experience_are_excluded(self):
         for kwargs in ({"title": "Senior Business Analyst"}, {"title": "Operations Analyst Intern"},
                        {"content": "This position requires 5 years of relevant experience."}):
@@ -182,6 +234,13 @@ class ScreeningTests(unittest.TestCase):
 
 
 class RunTests(unittest.TestCase):
+    def test_report_scope_explains_both_authorization_requirements(self):
+        cfg = config()
+        with patch.object(worker, "fetch_json", return_value={"jobs": [gh_row()]}):
+            report = worker.run_research(cfg)
+        self.assertIn(cfg["criteria"]["sponsorship_requirement_note"], report["scope"])
+        self.assertNotIn("sponsorship_requirement_note", report["records"][0])
+
     def test_deduplication_and_newness_are_stable(self):
         rows = {"jobs": [gh_row(1), gh_row(1), gh_row(2, title="Software Engineer")]}
         with patch.object(worker, "fetch_json", return_value=rows):
