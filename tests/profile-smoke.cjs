@@ -6,7 +6,8 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 (async () => {
   const server = http.createServer((req,res) => {
-    const name = req.url === '/' ? 'index.html' : req.url.slice(1);
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+    const name = pathname === '/' ? 'index.html' : pathname.slice(1);
     if (!['index.html','assets/app.css','assets/app.js','assets/config.js','assets/profile.js'].includes(name)) {res.writeHead(404).end();return;}
     res.setHeader('Content-Type',name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
     res.end(fs.readFileSync(path.join(__dirname,'..',name)));
