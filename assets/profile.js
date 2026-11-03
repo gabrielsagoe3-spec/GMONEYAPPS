@@ -3,12 +3,86 @@
   const el = id => document.getElementById(id);
   const cfg = window.GMONEY_DB;
   const storageKey = 'gmoney_session';
+  const linkStorageKey = 'gmoney_email_link';
+  const codeMode = cfg.emailMode === 'code';
+  const linkRecovery = 'This sign-in link cannot be used. Request a new sign-in link and open it in the same browser and device.';
+  const storageRecovery = 'Allow browser storage, then request a new sign-in link.';
+  const callback = window.GMONEY_AUTH_CALLBACK;
+  delete window.GMONEY_AUTH_CALLBACK;
   let session = null;
   let generation = 0;
-  let email = '';
+  let pendingEmail = '';
+  let authAction = null;
+  let resendAvailableAt = 0;
+  let resendTimer;
   let profileReady = false;
   const fields = ['fullName', 'roles', 'instructions', 'locations', 'salary', 'sponsorship', 'resumeText'];
   const clearFields = () => { for (const id of fields) el(id).value = id === 'sponsorship' ? 'unspecified' : ''; };
+  const base64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  function clearPendingLink() {
+    try { localStorage.removeItem(linkStorageKey); }
+    catch { throw Error(storageRecovery); }
+  }
+  function readPendingLink() {
+    let raw, record;
+    try { raw = localStorage.getItem(linkStorageKey); }
+    catch { throw Error(storageRecovery); }
+    try { record = JSON.parse(raw || 'null'); }
+    catch { clearPendingLink(); return null; }
+    if (!record) return null;
+    const age = Date.now() - record.requestedAt;
+    if (record.version !== 1 || typeof record.email !== 'string' || !/^[^\s@]+@[^\s@]+$/.test(record.email) || record.email.length > 320 ||
+      typeof record.verifier !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(record.verifier) ||
+      typeof record.requestId !== 'string' || !record.requestId || record.requestId.length > 100 ||
+      !Number.isFinite(record.requestedAt) || age < 0 || age > 3600000) {
+      clearPendingLink();
+      return null;
+    }
+    return record;
+  }
+  function linkRecordLock(action) {
+    return navigator.locks ? navigator.locks.request(linkStorageKey, action) : Promise.resolve().then(action);
+  }
+  async function sendEmailLink(email) {
+    if (!crypto.subtle) throw Error('Open this site securely to request a sign-in link.');
+    const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+    const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+    const record = {version:1, email, verifier, requestedAt:Date.now(), requestId:base64url(crypto.getRandomValues(new Uint8Array(16)))};
+    let previous;
+    try {
+      await linkRecordLock(() => {
+        previous = readPendingLink();
+        localStorage.setItem(linkStorageKey, JSON.stringify(record));
+        if (localStorage.getItem(linkStorageKey) !== JSON.stringify(record)) throw Error();
+      });
+    } catch { throw Error(storageRecovery); }
+    try {
+      const redirect = location.origin + location.pathname;
+      await request('/auth/v1/otp?redirect_to=' + encodeURIComponent(redirect), {method:'POST', body:JSON.stringify({email, create_user:true, code_challenge:challenge, code_challenge_method:'s256'})});
+    } catch (error) {
+      try {
+        await linkRecordLock(() => {
+          if (readPendingLink()?.requestId !== record.requestId) return;
+          if (previous) localStorage.setItem(linkStorageKey, JSON.stringify(previous));
+          else localStorage.removeItem(linkStorageKey);
+        });
+      } catch { /* Do not erase another tab's newer request. */ }
+      throw error;
+    }
+  }
+  function updateAuthControls() {
+    const remaining = Math.max(0, Math.ceil((resendAvailableAt - Date.now()) / 1000));
+    const sendButton = el('emailForm').querySelector('button');
+    sendButton.disabled = !!authAction || remaining > 0;
+    const method = codeMode ? 'code' : 'link';
+    sendButton.textContent = remaining > 0 ? 'Send another ' + method + ' in ' + remaining + 's' : pendingEmail ? 'Send another sign-in ' + method : 'Send sign-in ' + method;
+    el('accountEmail').disabled = !!authAction;
+    el('codeForm').querySelector('button').disabled = !codeMode || !!authAction || !pendingEmail;
+    el('loginCode').disabled = !!authAction;
+    el('codeDestination').textContent = codeMode && pendingEmail ? 'Enter the code sent to ' + pendingEmail + '.' : '';
+    clearTimeout(resendTimer);
+    if (remaining > 0) resendTimer = setTimeout(updateAuthControls, 1000);
+  }
   function setSession(value) {
     session = value;
     generation++;
@@ -20,6 +94,10 @@
     el('signOut').hidden = !session;
     el('emailForm').hidden = !!session;
     el('codeForm').hidden = true;
+    pendingEmail = '';
+    resendAvailableAt = 0;
+    el('loginCode').value = '';
+    updateAuthControls();
     el('applicationDraftList').replaceChildren();
     el('privateApplicationDrafts').hidden = true;
     el('applicationDraftSignIn').hidden = !!session;
@@ -28,19 +106,50 @@
     try { if (value) sessionStorage.setItem(storageKey, JSON.stringify(value)); else sessionStorage.removeItem(storageKey); } catch { /* In-memory session remains usable. */ }
   }
   async function request(path, options = {}, token) {
-    const response = await fetch(cfg.url + path, {
-      ...options,
-      headers: { apikey: cfg.publishableKey, 'Content-Type': 'application/json', ...(token ? {Authorization: 'Bearer ' + token} : {}), ...options.headers },
-      signal: AbortSignal.timeout(20000)
-    });
+    const isOtpRequest = path.split('?')[0] === '/auth/v1/otp';
+    const isLinkExchange = path === '/auth/v1/token?grant_type=pkce';
+    const isCodeRequest = isOtpRequest || path === '/auth/v1/verify' || isLinkExchange;
+    let response;
+    try {
+      response = await fetch(cfg.url + path, {
+        ...options,
+        headers: { apikey: cfg.publishableKey, 'Content-Type': 'application/json', ...(token ? {Authorization: 'Bearer ' + token} : {}), ...options.headers },
+        signal: AbortSignal.timeout(20000)
+      });
+    } catch {
+      throw Error(isLinkExchange ? linkRecovery : 'Could not connect. Check your connection and try again.');
+    }
     if (!response.ok) {
       if (response.status === 401 && token && session?.access_token === token) {
         setSession(null);
         el('authStatus').textContent = 'Your session expired. Sign in again.';
       }
+      if (isCodeRequest) {
+        let code;
+        try {
+          const body = await response.json();
+          code = typeof body?.code === 'string' ? body.code : body?.error_code;
+        } catch {}
+        if (response.status === 429 || ['over_email_send_rate_limit', 'over_request_rate_limit'].includes(code)) {
+          const error = Error(isLinkExchange ? 'Too many attempts. Wait at least a minute, then request a new sign-in link.' : 'Too many attempts. Wait at least a minute before trying again.');
+          error.retrySendAfter = isOtpRequest ? 60000 : 0;
+          throw error;
+        }
+        if (isLinkExchange) throw Error(linkRecovery);
+        if (path === '/auth/v1/verify' && (['otp_expired', 'otp_disabled', 'validation_failed'].includes(code) || [400, 401, 403].includes(response.status))) {
+          throw Error('That sign-in code is invalid or expired. Try the latest code or request a new one.');
+        }
+        if (code === 'email_address_invalid') throw Error('Enter a valid email address and try again.');
+        if (['email_provider_disabled', 'signup_disabled'].includes(code)) throw Error('Email sign-in is temporarily unavailable. Please try again later.');
+        throw Error(isOtpRequest
+          ? 'Could not send a sign-in ' + (codeMode ? 'code' : 'link') + '. Try again in a minute. If delivery still fails, contact support.'
+          : 'Could not verify your code. Please try again.');
+      }
       throw Error(response.status === 429 ? 'Too many attempts. Please wait before trying again.' : 'Request failed. Check your connection and try again.');
     }
-    return response.status === 204 ? null : response.json();
+    if (response.status === 204) return null;
+    try { return await response.json(); }
+    catch { throw Error(isLinkExchange ? linkRecovery : isCodeRequest ? 'Sign-in response could not be read. Request a new ' + (codeMode ? 'code' : 'link') + '.' : 'Request failed. Please try again.'); }
   }
   async function activeSession() {
     if (!session) throw Error('Sign in first.');
@@ -162,31 +271,61 @@
     try { await action(); } catch (error) { el(status).textContent = error.message; }
     finally { button.disabled = false; }
   }
+  async function authenticate(action, work) {
+    if (authAction || session || (action === 'send' && Date.now() < resendAvailableAt)) return;
+    const version = generation;
+    authAction = action;
+    updateAuthControls();
+    try { await work(version); }
+    catch (error) {
+      if (generation !== version) return;
+      if (error.retrySendAfter) resendAvailableAt = Date.now() + error.retrySendAfter;
+      el('authStatus').textContent = error.message;
+    } finally {
+      authAction = null;
+      updateAuthControls();
+    }
+  }
   el('emailForm').onsubmit = event => {
     event.preventDefault();
-    busy(event.currentTarget, async () => {
-      email = el('accountEmail').value.trim();
-      await request('/auth/v1/otp', {method:'POST', body:JSON.stringify({email, create_user:true})});
-      el('codeForm').hidden = false;
-      el('authStatus').textContent = 'Check your email for a sign-in code. Enter it below.';
-      el('loginCode').focus();
-    }, 'authStatus');
+    const requestedEmail = el('accountEmail').value.trim();
+    authenticate('send', async version => {
+      if (codeMode) await request('/auth/v1/otp', {method:'POST', body:JSON.stringify({email:requestedEmail, create_user:true})});
+      else await sendEmailLink(requestedEmail);
+      if (generation !== version) return;
+      pendingEmail = requestedEmail;
+      resendAvailableAt = Date.now() + 60000;
+      el('loginCode').value = '';
+      el('codeForm').hidden = !codeMode;
+      el('authStatus').textContent = codeMode
+        ? 'Check your email for a sign-in code. Use the latest code sent to you.'
+        : 'Check your email for a sign-in link. Use the latest link and open it in the same browser and device where you requested it.';
+      updateAuthControls();
+    }).then(() => {
+      if (codeMode && pendingEmail && !session) el('loginCode').focus();
+    });
   };
   el('codeForm').onsubmit = event => {
     event.preventDefault();
-    busy(event.currentTarget, async () => {
-      const result = await request('/auth/v1/verify', {method:'POST', body:JSON.stringify({email, token:el('loginCode').value.trim(), type:'email'})});
-      if (!result.user?.id || !result.access_token || !result.refresh_token) throw Error('Sign-in failed. Request a new code.');
+    if (!codeMode || !pendingEmail) return;
+    const email = pendingEmail, token = el('loginCode').value.trim();
+    authenticate('verify', async version => {
+      const result = await request('/auth/v1/verify', {method:'POST', body:JSON.stringify({email, token, type:'email'})});
+      if (generation !== version) return;
+      if (!result?.user?.id || !result.access_token || !result.refresh_token) throw Error('Sign-in failed. Request a new code.');
       result.expires_at ||= Math.floor(Date.now()/1000) + result.expires_in;
       setSession(result);
-      el('loginCode').value = '';
       await readProfile();
-    }, 'authStatus');
+    });
   };
-  el('signOut').onclick = () => {
+  el('signOut').onclick = async () => {
     const token = session?.access_token;
     setSession(null);
     el('authStatus').textContent = 'Signed out on this device.';
+    if (!codeMode) {
+      try { await linkRecordLock(clearPendingLink); }
+      catch { if (!session) el('authStatus').textContent = 'Signed out. Clear this browser’s site data to remove the pending sign-in link.'; }
+    }
     if (token) request('/auth/v1/logout?scope=local', {method:'POST'}, token).catch(() => {
       if (!session) el('authStatus').textContent = 'Signed out locally. Could not revoke the server session; it will expire automatically.';
     });
@@ -226,4 +365,39 @@
     const stored = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
     if (stored?.user?.id && stored.access_token && stored.refresh_token) { setSession(stored); readProfile(); }
   } catch { setSession(null); }
+  el('authHelp').textContent = codeMode
+    ? 'Sign in with an email code to save your information across devices.'
+    : 'Sign in with an email link to save your information across devices. Open the link in the same browser and device where you request it.';
+  if (callback && !session) {
+    if (codeMode || callback.error || !callback.code) {
+      el('authStatus').textContent = codeMode ? 'This sign-in link cannot be used. Request a new sign-in code below.' : linkRecovery;
+    } else {
+      authenticate('link', async version => {
+        const pending = await linkRecordLock(() => {
+          const record = readPendingLink();
+          if (!record) throw Error(linkRecovery);
+          clearPendingLink();
+          return record;
+        });
+        const result = await request('/auth/v1/token?grant_type=pkce', {method:'POST', body:JSON.stringify({auth_code:callback.code, code_verifier:pending.verifier})});
+        if (generation !== version) return;
+        if (!result?.user?.id || !result.access_token || !result.refresh_token || typeof result.user.email !== 'string' || result.user.email.toLowerCase() !== pending.email.toLowerCase()) throw Error(linkRecovery);
+        result.expires_at ||= Math.floor(Date.now()/1000) + result.expires_in;
+        setSession(result);
+        await readProfile();
+      });
+    }
+  } else if (!codeMode && !session) {
+    authenticate('restore', async version => {
+      const pending = await linkRecordLock(readPendingLink);
+      if (generation !== version) return;
+      if (pending) {
+        pendingEmail = pending.email;
+        el('accountEmail').value = pending.email;
+        resendAvailableAt = pending.requestedAt + 60000;
+        el('authStatus').textContent = 'Check your email for a sign-in link. Use the latest link and open it in this browser and device.';
+      }
+    });
+  }
+  updateAuthControls();
 })();
