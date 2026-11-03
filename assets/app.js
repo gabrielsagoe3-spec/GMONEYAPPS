@@ -27,6 +27,7 @@ window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 show(location.hash.slice(1));
 let report = null;
 let selectedFilter = 'all';
+let scheduleConfig = null;
 function renderRecords(filter = selectedFilter) {
   selectedFilter = filter;
   const records = report.records.filter(r => filter === 'all' || r.category === filter);
@@ -52,7 +53,7 @@ function renderAutomation(data) {
     $('automationRunStatus').textContent = 'No automated run published';
     $('automationState').textContent = 'This report was published without automated-run evidence. The research below is available, but it does not establish that a worker or recurring search ran.';
     for (const id of ['automationSources','automationFetched','automationSelected']) $(id).textContent = '—';
-    for (const id of ['automationFinished','automationRunId','automationTrigger','automationSchedule']) $(id).textContent = 'Not reported';
+    for (const id of ['automationFinished','automationRunId','automationTrigger']) $(id).textContent = 'Not reported';
     $('automationSourceList').innerHTML = '<li>No automated source results were included in this report.</li>';
     return;
   }
@@ -72,8 +73,6 @@ function renderAutomation(data) {
   $('automationFinished').textContent = displayTime(run.finishedAt);
   $('automationRunId').textContent = run.runId || 'Not reported';
   $('automationTrigger').textContent = run.trigger === 'scheduled' ? 'Schedule-triggered run' : run.trigger === 'manual' ? 'On-demand run' : 'Not reported';
-  // A scheduled past run does not prove that a scheduler is currently enabled.
-  $('automationSchedule').textContent = 'Current scheduler status not reported';
   $('automationSourceList').innerHTML = sources.map(source => {
     const ok = source.status === 'ok';
     const status = ok ? 'Responded' : source.status === 'failed' ? 'Failed' : 'Status unknown';
@@ -82,15 +81,50 @@ function renderAutomation(data) {
     return `<li><div class="section-title"><b>${url === '#' ? name : `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${name} ↗</a>`}</b><span class="badge${ok ? ' green' : ''}">${status}</span></div><p>${ok ? `${displayCount(source.fetched)} postings fetched` : 'This source did not contribute verified coverage.'}${Number.isInteger(source.invalid) && source.invalid > 0 ? ` · ${displayCount(source.invalid)} invalid entries skipped` : ''}</p>${!ok && source.error ? `<p class="source-error">${escapeHTML(source.error)}</p>` : ''}</li>`;
   }).join('') || '<li>No source results were included in this run.</li>';
 }
+function renderSchedule(config, stale = false) {
+  if (!config) {
+    $('automationSchedule').textContent = stale ? 'Schedule status unavailable' : 'No recurring schedule reported';
+    $('automationScheduleNote').textContent = stale
+      ? 'Could not load schedule settings. The research report can still be viewed.'
+      : 'No schedule configuration was included. A past scheduled run does not confirm a current schedule.';
+    return;
+  }
+  const expression = typeof config.schedule_expression === 'string' ? config.schedule_expression.trim() : '';
+  const everySixHours = /^(?:[0-5]?\d)\s+(?:\*\/6|0,6,12,18)\s+\*\s+\*\s+\*$/.test(expression);
+  const description = config.schedule_enabled
+    ? everySixHours ? 'Configured every 6 hours' : 'Recurring searches configured'
+    : 'Recurring searches disabled';
+  $('automationSchedule').textContent = stale ? 'Last reported: ' + description.toLowerCase() : description;
+  const updated = displayTime(config.updated_at);
+  $('automationScheduleNote').textContent = (stale ? 'Could not refresh schedule settings; this configuration may be stale. ' : '')
+    + (updated === 'Not reported' ? 'Configuration date not reported. ' : 'Configuration recorded ' + updated + '. ')
+    + 'Check the latest run time for recent activity.';
+}
+async function refreshSchedule(cfg) {
+  try {
+    const response = await fetch(cfg.url + '/rest/v1/research_automation_status?slug=eq.current&select=schedule_enabled,schedule_expression,backend,updated_at&limit=1', {
+      cache:'no-store', headers:{apikey:cfg.publishableKey}, signal:AbortSignal.timeout(15000)
+    });
+    if (!response.ok) throw Error('Schedule unavailable');
+    const rows = await response.json();
+    if (!Array.isArray(rows) || (rows[0] && typeof rows[0].schedule_enabled !== 'boolean')) throw Error('Invalid schedule configuration');
+    scheduleConfig = rows[0] || null;
+    renderSchedule(scheduleConfig);
+  } catch {
+    renderSchedule(scheduleConfig, true);
+  }
+}
 async function load() {
   const refreshButtons = [$('refreshReport'), $('refreshAutomation')];
   refreshButtons.forEach(b => b.disabled = true);
   $('loadState').hidden = false;
   $('loadState').textContent = 'Loading research from Supabase…';
   $('automationLoadState').textContent = 'Checking the latest published run…';
+  let scheduleRefresh = Promise.resolve();
   try {
     const cfg = window.GMONEY_DB;
-    if (!cfg?.url || !cfg?.publishableKey) throw Error('Database is not configured');
+    if (!cfg?.url || !cfg?.publishableKey) { renderSchedule(scheduleConfig, true); throw Error('Database is not configured'); }
+    scheduleRefresh = refreshSchedule(cfg);
     const res = await fetch(cfg.url + '/rest/v1/published_research_reports?slug=eq.current&select=report,published_at&limit=1', {cache:'no-store', headers:{apikey:cfg.publishableKey}, signal:AbortSignal.timeout(15000)});
     if (!res.ok) throw Error('Report unavailable');
     const rows = await res.json();
@@ -116,6 +150,7 @@ async function load() {
     $('automationLoadState').textContent = report ? 'Refresh failed. Showing the previously loaded report; its run evidence may be stale.' : 'Could not load run evidence from Supabase. No automation results have been assumed.';
     $('databaseStatus').textContent = 'Database could not be reached';
   } finally {
+    await scheduleRefresh;
     refreshButtons.forEach(b => b.disabled = false);
   }
 }

@@ -293,9 +293,21 @@ def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -
     matched = [phrase for phrase in criteria["role_patterns"] if phrase.casefold() in title_lower]
     if not matched:
         return None
+    # Broad business-family matches must not turn an engineering profession
+    # (for example, Customer Success Engineer) into a business-role lead.
+    if re.search(r"\b(?:engineer|developer|scientist|architect)\b", title, re.I):
+        return None
     score, exclusions, reasons = 30, [], []
     reasons.append(f"Title matches the configured '{matched[0]}' role family.")
-    senior = re.search(r"\b(?:senior|sr\.?|staff|principal|lead|manager|director|head|vice president|vp|chief)\b", title, re.I)
+    # Account/Customer Success Manager commonly names an individual-contributor
+    # business role; Staff Accountant is also not a seniority designation.
+    # Explicit Senior/Lead/etc. markers and experience requirements still apply.
+    senior = re.search(r"\b(?:senior|sr\.?|principal|lead|director|head|vice president|vp|chief)\b", title, re.I)
+    if not senior and re.search(r"\bstaff\b", title, re.I) and not re.search(r"\bstaff accountant\b", title, re.I):
+        senior = re.search(r"\bstaff\b", title, re.I)
+    other_manager_title = re.sub(r"\b(?:account|customer success) manager\b", "", title, flags=re.I)
+    if not senior and re.search(r"\bmanager\b", other_manager_title, re.I):
+        senior = re.search(r"\bmanager\b", other_manager_title, re.I)
     if criteria["entry_level"] and senior:
         exclusions.append(f"The title signals a {senior.group(0)} position rather than an entry-level opening.")
     if re.search(r"\bintern(?:ship)?\b", title + " " + job["commitment"], re.I):
@@ -305,6 +317,11 @@ def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -
         if re.search(r"\b(?:preferred|not required|does not require|do not require)\b", sentence, re.I):
             continue
         required_years = re.search(r"\b(?:at least|minimum(?: of)?|requires?|must have)\s+(\d{1,2})\+?\s+years?\b", sentence, re.I)
+        if not required_years:
+            # Employer qualification bullets often omit the word 'required'.
+            # Anchor to the beginning so company-history prose is not treated
+            # as a candidate experience requirement.
+            required_years = re.search(r"^\s*(?:[-•]\s*)?(\d{1,2})(?:\+|[-–]\d{1,2})?\s+years?\b", sentence, re.I)
         if required_years:
             break
     if criteria["entry_level"] and required_years and int(required_years.group(1)) > 2:
@@ -332,7 +349,7 @@ def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -
     category = "excluded" if exclusions else "verify"
     finding = "Listed in the employer's public job feed at retrieval time. "
     finding += " ".join(exclusions) if exclusions else "This is a research lead, not a verified application-ready match."
-    fit = " ".join(reasons) + " No candidate résumé was evaluated. Compensation, qualifications, and the requested start window are unverified."
+    fit = " ".join(reasons) + " No candidate résumé was evaluated. Compensation, qualifications, and employer start-date compatibility are unverified."
     evidence = sponsorship["label"]
     if sponsorship["quotes"]:
         evidence += ' Employer text: ' + ' | '.join('“' + quote + '”' for quote in sponsorship["quotes"])
@@ -420,7 +437,7 @@ def run_research(config: dict[str, Any], *, trigger: str = "manual", previous: d
     return {
         "updatedAt": started[:10],
         "mode": "Automated employer-feed research; applications require review",
-        "scope": ("Working search assumptions: " + str(config["criteria"].get("label", "configured title families")) + "; U.S. locations with " + (", ".join(config["criteria"].get("preferred_locations", [])) or "no specific city") + " preferred. " + ("Sponsorship required. " if config["criteria"]["sponsorship_required"] else "Sponsorship is recorded without being an exclusion. ") + str(config["criteria"].get("start_window", "Start window is not confirmed.")) + ". This run covers only the configured employer feeds, not LinkedIn or Indeed."),
+        "scope": ("Search criteria: " + str(config["criteria"].get("label", "configured title families")) + "; U.S. locations with " + (", ".join(config["criteria"].get("preferred_locations", [])) or "no specific city") + " preferred. " + ("Sponsorship required. " if config["criteria"]["sponsorship_required"] else "Sponsorship is recorded without being an exclusion. ") + str(config["criteria"].get("start_window", "Start window is not confirmed.")) + ". Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed."),
         "summary": f"Automatically retrieved {len(jobs)} job records from {successes} of {len(config['sources'])} employer feeds. Selected {verify} leads for verification and {excluded} excluded examples; {automation['stats']['relevant']} title-relevant records were screened before display limits. No candidate résumé was evaluated and no applications were submitted." + partial,
         "records": records,
         "additionalSources": [{"title": source["name"] + " — public " + source["provider"] + " feed", "url": source["url"], "note": (f"Retrieved {source['fetched']} records in this run." if source["status"] == "ok" else "Could not retrieve this feed: " + source["error"])} for source in automation["sources"]],

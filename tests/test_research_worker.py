@@ -75,6 +75,39 @@ class FeedTests(unittest.TestCase):
 
 
 class ScreeningTests(unittest.TestCase):
+    def test_confirmed_business_search_covers_multiple_early_career_functions(self):
+        criteria = json.loads((ROOT / "automation" / "config.json").read_text())["criteria"]
+        titles = [
+            "Business Analyst", "Finance Associate", "Staff Accountant",
+            "Marketing Coordinator", "Customer Success Associate",
+            "Customer Success Manager", "Account Manager", "Account Executive",
+            "Project Coordinator", "Business Development Representative",
+            "Sales Development Representative", "Operations Specialist",
+            "Procurement Coordinator", "Recruiting Coordinator",
+            "Administrative Assistant", "Engineering Project Coordinator",
+        ]
+        for title in titles:
+            with self.subTest(title=title):
+                result = worker.screen_job(job(title=title), criteria, NOW)
+                self.assertIsNotNone(result)
+                self.assertEqual(result["category"], "verify")
+                self.assertIn("employer start-date compatibility are unverified", result["fit"])
+        self.assertEqual(criteria["available_from"], "2027-06-01")
+        self.assertNotIn("unconfirmed", criteria["start_window"].lower())
+        self.assertTrue(criteria["sponsorship_required"])
+        self.assertEqual(criteria["preferred_locations"], ["Houston"])
+
+    def test_broad_business_search_does_not_select_technical_or_senior_roles(self):
+        criteria = json.loads((ROOT / "automation" / "config.json").read_text())["criteria"]
+        for title in ["Software Engineer", "Customer Success Engineer", "Customer Success Architect", "Business Analyst / Developer"]:
+            with self.subTest(title=title):
+                self.assertIsNone(worker.screen_job(job(title=title), criteria, NOW))
+        for title in ["Senior Customer Success Manager", "Director of Marketing Operations", "Lead Finance Associate", "Staff Business Analyst", "Account Manager / Team Manager"]:
+            with self.subTest(title=title):
+                self.assertEqual(worker.screen_job(job(title=title), criteria, NOW)["category"], "excluded")
+        experienced = worker.screen_job(job(title="Account Manager", content="<ul><li>5+ years of account management experience</li></ul>"), criteria, NOW)
+        self.assertEqual(experienced["category"], "excluded")
+
     def test_only_relevant_titles_are_selected(self):
         self.assertIsNone(worker.screen_job(job(title="Software Engineer"), config()["criteria"], NOW))
         match = worker.screen_job(job(), config()["criteria"], NOW)

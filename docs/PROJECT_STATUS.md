@@ -1,26 +1,26 @@
 # G Money Job Agent status
 
-The assistant researches opportunities and records findings; the user supplies preferences and missing personal answers. Manual job entry is not required.
+## Running
 
-## Implemented
+- Supabase-native research worker, scheduled every six hours independently of this chat.
+- Six employer feeds with title/location/seniority/sponsorship screening, retrieval evidence, failures and cross-run deduplication. A verified complete run fetched 1,110 postings and recorded 30 leads for verification.
+- Scoped report publication, private archival, signed one-use invocations and protected original-posting evidence.
+- Dashboard code for overview, research, Automation, private applications/profile and connection tabs; GitHub Pages serves main/root.
 
-- Static dashboard with overview, research, Automation, applications, private-profile and connection tabs.
-- Public published research read from Supabase. The existing report contains seven previously researched entries; it is not an automated run.
-- Research worker for six configured employer feeds, transparent rule-based screening and sponsorship evidence, source failures, retrieval timestamps and deduplication.
-- Restricted report publication endpoint, private report archive and scoped credential provisioning script.
-- Prepared GitHub Actions workflow for manual research and an opt-in six-hour schedule.
-- Email-code sign-in and private profile form for résumé text, titles, locations, minimum salary and sponsorship needs.
+## Private candidate features
 
-## Verified on the existing Supabase project
+The uploaded résumé is staged privately. Verified sign-in with its matching email imports the résumé and confirmed preferences without overwriting saved edits. Two private application drafts have been prepared from actual employer requirements and résumé facts. They require answers and eligibility/location checks and are not submissions.
 
-Private-profile fields and research-publication function are installed. Live transaction tests passed for owner reads/writes, cross-account isolation, anonymous denial, ownership protection, worker authorization, idempotency, stale-run rejection, validation and archival. All synthetic test changes were rolled back. Code email templates are configured; delivery has not been tested. No custom SMTP is configured.
+## Verified
 
-## Not activated or unverified
+Live manual and actual scheduled research runs returned HTTP 200. Database tests passed for owner isolation, anonymous denial, ownership protection, verified-email import, private drafts, restricted publishing, archival, run-ID/stale-run protections and single-use invocation checks. All synthetic fixtures were rolled back. Browser and worker tests passed; public report checks found no uploaded contact email.
 
-- Employer feeds are blocked by environment proxy policy until the saved network additions are applied. No real automated research run has yet completed or been published.
-- The new frontend and workflow are local changes awaiting release; GitHub Pages currently serves main/root.
-- GitHub Actions secret management is denied to the current integration. A repository administrator must add the separately provisioned worker credential. No scheduled worker is enabled.
-- Browser profile and automation tests use mocked API responses. Live email delivery and cross-device sign-in remain unverified.
-- Matching uses public criteria in automation/config.json, not private résumé analysis. No application submission, continuous AI research, Gmail reader, SMS delivery, storage bucket, or LinkedIn/Indeed account integration is running.
+## Remaining limitations
 
-See [AUTOMATION.md](AUTOMATION.md) for commands, activation and exact limitations. See [PRIVATE_PROFILE_SETUP.md](PRIVATE_PROFILE_SETUP.md) for account setup. Candidate contact information, secret keys and private résumés must stay out of source control and public reports.
+- No employer submission integration, continuous AI agent, LinkedIn/Indeed account access, Gmail reader or SMS integration is running. No applications or outreach were sent.
+- Research screening uses confirmed public search criteria, not automatic private résumé evaluation. Candidate-specific drafts are prepared privately with gaps made explicit.
+- Profile edits do not automatically change the scheduled search yet; confirm changes in chat.
+- Email-code templates and verification are configured, but actual delivery/cross-device login are unverified. Default Supabase mail restrictions may require SMTP configuration.
+- Direct employer-feed access in this coding environment remains blocked until its saved network additions are applied. Production scheduling runs in Supabase and is already verified.
+
+See [AUTOMATION.md](AUTOMATION.md) for operations and [PRIVATE_PROFILE_SETUP.md](PRIVATE_PROFILE_SETUP.md) for profile activation details. Keep résumé contents, private drafts, contact information and keys out of source control and public reports.

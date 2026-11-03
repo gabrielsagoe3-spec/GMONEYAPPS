@@ -1,9 +1,7 @@
 # G Money Job Agent
 
-Assistant-managed job research. The user gives direction; the assistant researches and records findings.
+G Money researches public employer postings and records source-linked findings. A Supabase worker runs every six hours; the dashboard shows actual run evidence and screening explanations. Research leads remain unverified until sponsorship, qualifications and start dates are checked.
 
-The website reads published research from Supabase with a browser-safe publishable key. Private tables are created with RLS. Email-code sign-in and private profile sync are implemented in the frontend. The profile migration and code-email templates are applied. Live email delivery and frontend release remain unverified; see docs/PRIVATE_PROFILE_SETUP.md.
+The static website is served by GitHub Pages from main/root. It reads public reports and schedule configuration using a browser-safe Supabase publishable key. Private profiles, uploaded résumé import and application drafts require verified-email sign-in. No administrator credentials or candidate data belong in frontend files or GitHub.
 
-Serve the site over HTTP. On GitHub the site files are at repository root. See docs/PROJECT_STATUS.md for setup and verification status. No continuous job-search or application agent is running.
-
-Research automation commands, activation requirements and tested limitations are documented in [docs/AUTOMATION.md](docs/AUTOMATION.md).
+Serve locally with `python3 -m http.server 8000 --bind 127.0.0.1`. There is no frontend build or dependency-install step. See [automation operations](docs/AUTOMATION.md), [project status](docs/PROJECT_STATUS.md) and [private profiles](docs/PRIVATE_PROFILE_SETUP.md) for commands, validation and limitations. Employer application submission is not connected yet.

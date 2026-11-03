@@ -1,42 +1,61 @@
-# Research automation
+# G Money research automation
 
-This version automates public employer-feed research. It screens titles, locations, seniority and sponsorship statements; it does not evaluate a private résumé, submit applications, or read LinkedIn/Indeed accounts. Unknown sponsorship and qualifications remain explicit verification tasks. The configurable starting criteria come from the existing public report, including Houston preference and an unconfirmed post-May-2027 full-time start window.
+The production worker is a Supabase Edge Function scheduled by pg_cron every six hours. It keeps running independently of this chat. It uses scoped publication credentials; the seven-day setup token is not required for scheduled execution. No GitHub Actions secret is needed.
 
-## What runs
+The confirmed search is for business roles, Houston preferred with wider U.S. locations considered, sponsorship needed, and full-time availability after May 2027. Public configuration is in `automation/config.json`. Profile edits do not yet update this configuration automatically; changes confirmed in chat can be deployed with the administration helper.
 
-`automation/research_worker.py` reads four Greenhouse boards and two Lever boards configured in `automation/config.json`. It creates a report compatible with the dashboard, with run IDs, retrieval times, source results, explanations, exclusions and deduplication. The source listing is evidence of retrieval, not proof of a new posting or confirmed eligibility.
+## What works
 
-Use the existing isolated checkout at `/workspace/GMONEYAPPS`; no extra worktree is needed. Python 3 standard library is sufficient.
+The hosted worker has completed live manual and automatic runs. A verified run retrieved 1,110 postings from all six feeds, screened 208 title-relevant records and recorded 30 leads under the display limit. Repeated runs correctly reported existing selected jobs as not new. Counts change with employer feeds; consult the dashboard for current evidence.
+
+The source feeds are SoFi, Affirm, Datadog, HubSpot, Palantir and Wealthfront on Greenhouse/Lever. Matching is transparent rule-based screening, not a full résumé assessment. Unknown sponsorship and start dates remain verification tasks. The worker does not access LinkedIn/Indeed accounts or submit applications.
+
+## Runtime and security
+
+- `supabase/functions/gmoney-research/index.ts` fetches public feeds, normalizes descriptions, screens roles and publishes through `public.publish_automated_research`.
+- Publication uses a dedicated scoped key. It can write validated public research and public posting evidence; it cannot read candidate profiles. Public reports never contain résumé text, contact details or private drafts.
+- Prior reports are archived privately. Conflicting run IDs, stale runs, complete source failure, and empty partial coverage cannot replace current results. Other partial runs clearly identify failed sources.
+- The scheduler stores an invocation key in encrypted Supabase Vault and the worker secret store. Queued requests contain a timestamped HMAC signature and a one-use nonce, never a reusable key. Signatures expire after five minutes and consumed nonces cannot be replayed. PostgreSQL extension queue visibility is not trusted as a credential boundary.
+- Selected original employer requirements are cached privately to ground application drafts. This cache is public employer information, not candidate data.
+- `public.research_automation_status` exposes configuration only. The dashboard distinguishes configured scheduling from the latest actual run evidence.
+
+## Administration
+
+Use the existing isolated checkout at `/workspace/GMONEYAPPS`; no extra worktree is needed. Python 3 standard library is sufficient. An authorized, securely injected Supabase Management API token is needed only for administration:
+
+```sh
+python3 automation/native_admin.py status
+python3 automation/native_admin.py deploy
+python3 automation/native_admin.py sync-config
+python3 automation/native_admin.py trigger
+python3 automation/native_admin.py disable-schedule
+python3 automation/native_admin.py enable-schedule
+```
+
+`deploy` uploads worker code; `sync-config` updates confirmed public search criteria; `trigger` queues one manual run. Enable/disable are explicit scheduling operations. None print keys or private documents. Existing schema and credentials must be inspected before migrations or key rotation. Migrations in this release have already been applied to the existing project; do not reapply them blindly.
+
+The original Python worker remains available for local research/testing:
 
 ```sh
 python3 automation/fetch_previous.py automation/previous-report.json
 python3 automation/research_worker.py --once --previous automation/previous-report.json
-python3 automation/publish_report.py automation/latest-report.json
 ```
 
-The first two steps use public data only. The last needs the separate `GMONEY_RESEARCH_KEY` environment variable. Never use the seven-day Supabase administration token as the workflow credential. A failed source is reported. Complete source failure, and partial coverage with no selected findings, stop without replacing the prior output. Other partial runs show responding sources only; the prior published report is archived privately rather than mixed with unverified current results. Repeated identical publication is safe; stale runs and conflicting run IDs are rejected.
+Direct feed requests from the coding environment still need the saved network additions `boards-api.greenhouse.io` and `api.lever.co` applied there. This does not prevent the deployed native worker from running. The local publisher is an advanced tool requiring the scoped worker key; ordinary administration should use the native helper rather than extracting keys.
 
-## Hosted database
+## Private profile and application preparation
 
-The private-profile migration and restricted publisher migration have been applied to the existing project. The initial migration was not reapplied. Owner-only profile rules and publisher authorization/archival protections were verified with transaction-local synthetic test data, all rolled back. No automated research report has been published by these tests.
+The uploaded résumé is staged in a private table. Sign-in must verify its matching email before the résumé and candidate-specific drafts can be accessed. Drafts contain truthful summaries, cover letters, fit notes and explicit missing answers; they are not submission records. Existing profile edits are preserved during import. No emails, applications or employer messages have been sent by this setup.
 
-`public.publish_automated_research` accepts only the public research contract and requires a dedicated high-entropy key. It cannot read candidate profiles. The database stores only a SHA-256 digest in a private table. The worker key authorizes publication, so keep it secure even though it is narrower than an administrator key.
-
-## Remaining activation
-
-1. Save the environment network additions `boards-api.greenhouse.io` and `api.lever.co`. The initial live requests were denied by proxy CONNECT 403; a real search must succeed before claiming automation works with current employer data.
-2. The GitHub integration can read/write source, but Actions-secret management returns `403 Resource not accessible by integration`. A repository administrator must provision the scoped worker key: run `automation/provision_worker.sql` in Supabase SQL editor and copy its result directly into GitHub repository **Settings → Secrets and variables → Actions**, secret name **GMONEY_RESEARCH_KEY**. The SQL file contains no key; running it generates one and stores its digest. Re-running rotates the credential.
-3. Review and release the frontend and `.github/workflows/research.yml` to the default branch. They remain local changes until that release; the live GitHub Pages site does not automatically include this workspace.
-4. First run **Job research** manually in Actions and inspect real report counts and source outcomes. Then set repository Actions variable **GMONEY_AUTOMATION_ENABLED** to **true** to opt into the six-hour schedule. Scheduling is not currently enabled. GitHub schedules may be delayed and do not survive an inactive/disabled workflow setting automatically.
-
-GitHub Pages serves the existing site from main, root: https://gabrielsagoe3-spec.github.io/GMONEYAPPS/. Report publication goes to Supabase; later research updates need no website redeployment once the new UI is released. No application submission or outbound-message integration is included.
+Live email delivery remains unverified and custom SMTP is not configured. Supabase's built-in mail service has recipient and rate restrictions; reliable delivery to other addresses may require an approved SMTP provider. Do not disable email verification to bypass those restrictions.
 
 ## Validation
 
 ```sh
 python3 -m unittest discover -s tests -p 'test_*.py'
+node tests/edge-research.test.mjs
 node tests/automation-smoke.cjs
 node tests/profile-smoke.cjs
 ```
 
-Browser tests use mocked service responses and installed Playwright/system Chromium. `tests/profile-rls.sql` and `tests/research-publisher-rls.sql` are live database assertions with rollback. Email-code templates are configured for login and account confirmation; no email has been sent and delivery is unverified. Custom SMTP is not configured.
+Python tests and Edge tests cover failure preservation, source parsing, screening, deduplication, scoped publication, signatures, nonce replay and evidence caching. Browser tests use synthetic API fixtures. SQL tests in `tests/*rls.sql` verify live database ownership, résumé import, draft isolation, publication and invocation protections with all fixtures rolled back. Live hosted research and an actual automatic cron run were verified separately.
