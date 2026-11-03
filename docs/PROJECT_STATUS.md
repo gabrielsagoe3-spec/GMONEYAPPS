@@ -1,41 +1,26 @@
-# Job agent: ownership and next steps
+# G Money Job Agent status
 
-## The agreement
-The assistant researches opportunities, evaluates fit, prepares and (where supported) submits applications, and publishes a breakdown. The user gives preferences and supplies missing personal answers. The dashboard is an overview of the assistant's work; it must not require manual job entry.
+## Running
 
-## Working today
-- Assistant-published research report served from Supabase `published_research_reports`, with employer source URLs, check dates, decisions, fit assessments and next actions.
-- Website overview, research filters, application-status explanation, connection status and browser-local preferences.
-- Source on GitHub. Published report can be read on phone or laptop; local preferences do not sync.
+- Supabase-native research worker, scheduled every six hours independently of this chat.
+- Six employer feeds with title/location/seniority/sponsorship screening, retrieval evidence, failures and cross-run deduplication. A verified complete run fetched 1,110 postings and recorded 30 leads for verification.
+- Scoped report publication, private archival, signed one-use invocations and protected original-posting evidence.
+- Dashboard code for overview, research, Automation, private applications/profile and connection tabs; GitHub Pages serves main/root.
 
-## Not working yet
-- No continuous background research, AI backend, form-filling worker, submission integration, Gmail reader, SMS delivery or MCP server is running.
-- Supabase private-account sign-in and preference sync are not implemented. The Supabase dashboard account does not automatically sign the user into this website.
-- Candidate resumes, contact details, secret API keys and provider credentials must not be committed to this repository.
+## Private candidate features
 
-## Organization
-- `index.html`: site shell
-- `assets/`: presentation and frontend logic
-- `data/research.json`: published research snapshot containing public job information only
-- `supabase/migrations/`: applied initial schema source
-- `docs/`: product agreement and implementation status
+The uploaded résumé is staged privately. Verified sign-in with its matching email imports the résumé and confirmed preferences without overwriting saved edits. Two private application drafts have been prepared from actual employer requirements and résumé facts. They require answers and eligibility/location checks and are not submissions.
 
-## Supabase connection (November 2, 2026)
-Project `gmoney-job-agent` (`awscnughpnerhkslhmln`) was created in the user-selected existing organization on the quoted $0/month setup, us-east-2.
+## Verified
 
-The initial schema is applied. It contains agent_preferences, research_runs, job_findings, application_records and published_research_reports. The browser reads the public-information report with a publishable key. No secret key is in the frontend. Only public job research belongs in the published report; private candidate information must use user-owned tables.
+Live manual and actual scheduled research runs returned HTTP 200. Database tests passed for owner isolation, anonymous denial, ownership protection, verified-email import, private drafts, restricted publishing, archival, run-ID/stale-run protections and single-use invocation checks. All synthetic fixtures were rolled back. Browser and worker tests passed; public report checks found no uploaded contact email.
 
-The assistant can update the current report through the authorized Supabase connection. The website loads the latest report on opening or Refresh report, without a code deployment. The research date remains October 30; connecting the database is not a new job-research pass.
+## Remaining limitations
 
-Test transactions verified owner-only preference visibility, owner updates, rejection of ownership reassignment, denial of anonymous private reads and denial of client-forged application submissions. Test users and rows were rolled back. Security advisors reported no findings. Frontend reading is tested separately via the public REST endpoint.
+- No employer submission integration, continuous AI agent, LinkedIn/Indeed account access, Gmail reader or SMS integration is running. No applications or outreach were sent.
+- Research screening uses confirmed public search criteria, not automatic private résumé evaluation. Candidate-specific drafts are prepared privately with gaps made explicit.
+- Profile edits do not automatically change the scheduled search yet; confirm changes in chat.
+- Email-code templates and verification are configured, but actual delivery/cross-device login are unverified. Default Supabase mail restrictions may require SMTP configuration.
+- Direct employer-feed access in this coding environment remains blocked until its saved network additions are applied. Production scheduling runs in Supabase and is already verified.
 
-Next: implement account sign-in and private preference sync, then private resume storage and application workflow. Local preferences do NOT sync yet. No storage bucket or continuous agent exists yet.
-
-## Application phase
-Verify a role is current and eligible, resolve missing profile information, prepare truthful answers and documents, test one authorized employer integration, and preserve actual submission confirmations with duplicate prevention. Human assessments remain for the candidate to complete. LinkedIn access must not be assumed from the existence of an MCP connection.
-
-## Morning briefing (future)
-Summarize relevant Gmail recruiter replies, interview requests, deadlines and next steps. Time and delivery method (SMS versus ChatGPT notification) remain unresolved; no schedule configured.
-
-## Validation limits
-Frontend script syntax and report consistency checked. Initial migration applied; access-policy assertions and security advisors passed. No actual job application or outreach was sent during this research pass.
+See [AUTOMATION.md](AUTOMATION.md) for operations and [PRIVATE_PROFILE_SETUP.md](PRIVATE_PROFILE_SETUP.md) for profile activation details. Keep résumé contents, private drafts, contact information and keys out of source control and public reports.

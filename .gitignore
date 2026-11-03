@@ -4,3 +4,9 @@
 node_modules/
 resumes/
 private/
+
+# Generated research outputs and Python caches
+automation/latest-report.json
+automation/latest-report.json.lock
+__pycache__/
+automation/previous-report.json
