@@ -24,7 +24,7 @@ def config():
         "criteria": {
             "label": "Entry-level analyst work", "role_patterns": ["business analyst", "operations analyst"],
             "preferred_locations": ["Houston"], "country": "US", "entry_level": True,
-            "sponsorship_required": True, "start_window": "After May 2027, unconfirmed",
+            "sponsorship_required": True, "start_window": "From May 1, 2027 onward",
             "sponsorship_requirement_note": "Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.",
         },
         "max_records": 30, "max_excluded": 5, "sources": [dict(GH)],
@@ -93,7 +93,7 @@ class ScreeningTests(unittest.TestCase):
                 self.assertIsNotNone(result)
                 self.assertEqual(result["category"], "verify")
                 self.assertIn("employer start-date compatibility are unverified", result["fit"])
-        self.assertEqual(criteria["available_from"], "2027-06-01")
+        self.assertEqual(criteria["available_from"], "2027-05-01")
         self.assertNotIn("unconfirmed", criteria["start_window"].lower())
         self.assertTrue(criteria["sponsorship_required"])
         self.assertIn("valid OPT/CPT where applicable", criteria["sponsorship_requirement_note"])

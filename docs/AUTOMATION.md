@@ -2,7 +2,7 @@
 
 The production worker is a Supabase Edge Function scheduled by pg_cron every six hours. It keeps running independently of this chat. It uses scoped publication credentials; the seven-day setup token is not required for scheduled execution. No GitHub Actions secret is needed.
 
-The confirmed search is for business roles, Houston preferred with wider U.S. locations considered, sponsorship needed, and full-time availability after May 2027. Public configuration is in `automation/config.json`. Profile edits do not yet update this configuration automatically; changes confirmed in chat can be deployed with the administration helper.
+The confirmed search is for business roles, Houston preferred with wider U.S. locations considered, sponsorship needed, and full-time availability from May 1, 2027 onward. Public configuration is in `automation/config.json`. Profile edits do not yet update this configuration automatically; changes confirmed in chat can be deployed with the administration helper.
 
 ## What works
 
