@@ -22,9 +22,28 @@ function show(view) {
   history.replaceState(null, '', '#' + view);
   window.scrollTo(0, 0);
 }
+function showCurrentView(captureCallback = false) {
+  const query = new URLSearchParams(location.search);
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const markers = ['code', 'error', 'error_code', 'error_description', 'access_token', 'refresh_token'];
+  const fragmentAuth = markers.some(key => fragment.has(key));
+  if (fragmentAuth || markers.some(key => query.has(key))) {
+    const code = query.get('code');
+    const error = fragmentAuth || query.has('error') || query.has('error_code') || query.has('access_token') || query.has('refresh_token') || query.getAll('code').length !== 1 || !code || code.length > 4096;
+    for (const key of [...markers, 'token_type', 'expires_in', 'expires_at', 'type']) query.delete(key);
+    history.replaceState(null, '', location.pathname + (query.size ? '?' + query.toString() : '') + '#preferences');
+    if (captureCallback) window.GMONEY_AUTH_CALLBACK = {code:error ? null : code, error};
+    $('authStatus').textContent = error
+      ? 'This sign-in link cannot be used. Request a new sign-in ' + (window.GMONEY_DB.emailMode === 'code' ? 'code' : 'link') + ' below.'
+      : 'Completing your sign-in…';
+    show('preferences');
+    return;
+  }
+  show(location.hash.slice(1));
+}
 document.querySelectorAll('[data-view],[data-go]').forEach(b => b.addEventListener('click', () => show(b.dataset.view || b.dataset.go)));
-window.addEventListener('hashchange', () => show(location.hash.slice(1)));
-show(location.hash.slice(1));
+window.addEventListener('hashchange', () => showCurrentView());
+showCurrentView(true);
 let report = null;
 let selectedFilter = 'all';
 let scheduleConfig = null;

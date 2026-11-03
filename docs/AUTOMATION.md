@@ -47,7 +47,7 @@ Direct feed requests from the coding environment still need the saved network ad
 
 The uploaded résumé is staged in a private table. Sign-in must verify its matching email before the résumé and candidate-specific drafts can be accessed. Drafts contain truthful summaries, cover letters, fit notes and explicit missing answers; they are not submission records. Existing profile edits are preserved during import. No emails, applications or employer messages have been sent by this setup.
 
-Live email delivery remains unverified and custom SMTP is not configured. Supabase's built-in mail service has recipient and rate restrictions; reliable delivery to other addresses may require an approved SMTP provider. Do not disable email verification to bypass those restrictions.
+Default-provider email-link sign-in uses PKCE and the production site redirect. Custom numeric-code templates require a separate SMTP provider. A fresh user-initiated login after the repair remains to be confirmed; custom SMTP is not configured. Supabase's built-in mail service has recipient and rate restrictions; reliable delivery to other addresses may require an approved SMTP provider. Do not disable email verification to bypass those restrictions.
 
 ## Validation
 
@@ -56,6 +56,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 node tests/edge-research.test.mjs
 node tests/automation-smoke.cjs
 node tests/profile-smoke.cjs
+node tests/email-link-smoke.cjs
 ```
 
 Python tests and Edge tests cover failure preservation, source parsing, screening, deduplication, scoped publication, signatures, nonce replay and evidence caching. Browser tests use synthetic API fixtures. SQL tests in `tests/*rls.sql` verify live database ownership, résumé import, draft isolation, publication and invocation protections with all fixtures rolled back. Live hosted research and an actual automatic cron run were verified separately.
