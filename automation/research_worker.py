@@ -121,6 +121,9 @@ def validate_config(config: Any) -> dict[str, Any]:
     for name in ("entry_level", "sponsorship_required"):
         if not isinstance(criteria.get(name), bool):
             raise ValueError(f"criteria.{name} must be a boolean.")
+    note = criteria.get("sponsorship_requirement_note", "")
+    if not isinstance(note, str) or len(note) > 500:
+        raise ValueError("criteria.sponsorship_requirement_note must be a short string.")
     for name, default in (("max_records", 30), ("max_excluded", 5)):
         value = config.get(name, default)
         if type(value) is not int or value < 0 or value > 200 or (name == "max_records" and value < 1):
@@ -232,6 +235,10 @@ POSITIVE_SPONSORSHIP = [
     r"\b(?:we|company)\s+(?:will\s+|can\s+|may\s+)?sponsor\s+(?:work\s+|employment\s+)?visas?\b",
     r"\bvisa\s+sponsorship\s*:\s*yes\b",
 ]
+TEMPORARY_SPONSORSHIP_NOT_NEEDED = re.compile(
+    r"\bno\s+(?:(?:employment|work|visa|immigration)\s+)*sponsorship\s+"
+    r"(?:(?:is|will be)\s+)?(?:required|needed)\s+(?:during|on|while(?:\s+on)?)\s+"
+    r"(?:valid\s+|authorized\s+|STEM\s+)*(?:OPT|CPT)\b", re.I)
 
 
 def sponsorship_evidence(description: str) -> dict[str, Any]:
@@ -240,13 +247,19 @@ def sponsorship_evidence(description: str) -> dict[str, Any]:
         text = sentence.strip()
         if not text:
             continue
-        is_negative = any(re.search(pattern, text, re.I) for pattern in NEGATIVE_SPONSORSHIP)
+        # Match H-1B statements using the same conservative visa rules, while
+        # retaining the employer's original wording in evidence quotes.
+        matching_text = re.sub(r"\bh[\s-]?1b(?:\s+visas?)?\b", "visa", text, flags=re.I)
+        # A temporary lack of need for sponsorship says nothing about future
+        # H-1B support. Remove only that phrase; screen other clauses normally.
+        matching_text = TEMPORARY_SPONSORSHIP_NOT_NEEDED.sub("", matching_text)
+        is_negative = any(re.search(pattern, matching_text, re.I) for pattern in NEGATIVE_SPONSORSHIP)
         # Reject a positive substring governed by a nearby negation, while
         # preserving genuinely conflicting clauses in the same sentence.
         is_positive = False
         for pattern in POSITIVE_SPONSORSHIP:
-            for match in re.finditer(pattern, text, re.I):
-                prefix = text[max(0, match.start() - 60):match.start()]
+            for match in re.finditer(pattern, matching_text, re.I):
+                prefix = matching_text[max(0, match.start() - 60):match.start()]
                 negated = re.search(r"\b(?:not|no|cannot|can't|unable to|without)(?:\s+(?:currently|now|ever|able to|employment|work|immigration|visa)){0,5}\s*$", prefix, re.I)
                 if not negated:
                     is_positive = True
@@ -359,8 +372,8 @@ def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -
         "category": category, "sponsorship": evidence,
         "sponsorshipStatus": sponsorship["status"], "sponsorshipEvidence": sponsorship["quotes"],
         "finding": finding, "fit": fit,
-        "next": ("Do not apply under the current criteria. Review the stated exclusion before reconsidering."
-                 if exclusions else "Review the full employer posting and confirm sponsorship, required experience, pay, and the requested start window before preparing an application."),
+        "next": ("Do not apply under the current criteria. Review the stated exclusion and verify initial OPT/CPT acceptance for the role and work dates and future H-1B sponsorship before reconsidering."
+                 if exclusions else "Review the full employer posting and verify initial OPT/CPT acceptance for the role and work dates, future H-1B sponsorship, required experience, pay, and the requested start window before preparing an application."),
         "url": job["url"], "checkedAt": checked_at[:10], "retrievedAt": checked_at,
         "sourceType": "employer_feed", "sourceId": job["sourceId"],
         "matchScore": 0 if exclusions else score,
@@ -437,7 +450,7 @@ def run_research(config: dict[str, Any], *, trigger: str = "manual", previous: d
     return {
         "updatedAt": started[:10],
         "mode": "Automated employer-feed research; applications require review",
-        "scope": ("Search criteria: " + str(config["criteria"].get("label", "configured title families")) + "; U.S. locations with " + (", ".join(config["criteria"].get("preferred_locations", [])) or "no specific city") + " preferred. " + ("Sponsorship required. " if config["criteria"]["sponsorship_required"] else "Sponsorship is recorded without being an exclusion. ") + str(config["criteria"].get("start_window", "Start window is not confirmed.")) + ". Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed."),
+        "scope": ("Search criteria: " + str(config["criteria"].get("label", "configured title families")) + "; U.S. locations with " + (", ".join(config["criteria"].get("preferred_locations", [])) or "no specific city") + " preferred. " + ("Sponsorship required. " if config["criteria"]["sponsorship_required"] else "Sponsorship is recorded without being an exclusion. ") + (config["criteria"].get("sponsorship_requirement_note", "").strip() + " " if config["criteria"].get("sponsorship_requirement_note", "").strip() else "") + str(config["criteria"].get("start_window", "Start window is not confirmed.")) + ". Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed."),
         "summary": f"Automatically retrieved {len(jobs)} job records from {successes} of {len(config['sources'])} employer feeds. Selected {verify} leads for verification and {excluded} excluded examples; {automation['stats']['relevant']} title-relevant records were screened before display limits. No candidate résumé was evaluated and no applications were submitted." + partial,
         "records": records,
         "additionalSources": [{"title": source["name"] + " — public " + source["provider"] + " feed", "url": source["url"], "note": (f"Retrieved {source['fetched']} records in this run." if source["status"] == "ok" else "Could not retrieve this feed: " + source["error"])} for source in automation["sources"]],

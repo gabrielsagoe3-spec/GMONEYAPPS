@@ -41,6 +41,7 @@ export function validateConfig(config) {
   if (!Array.isArray(criteria.role_patterns) || !criteria.role_patterns.length || criteria.role_patterns.some(v=>typeof v !== 'string' || !v.trim() || v.length > 1000)) throw new Error('Invalid role criteria.');
   if (!Array.isArray(criteria.preferred_locations ?? []) || (criteria.preferred_locations ?? []).some(v=>typeof v !== 'string')) throw new Error('Invalid location criteria.');
   if (typeof criteria.entry_level !== 'boolean' || typeof criteria.sponsorship_required !== 'boolean') throw new Error('Invalid screening criteria.');
+  if (typeof (criteria.sponsorship_requirement_note ?? '') !== 'string' || (criteria.sponsorship_requirement_note ?? '').length > 500) throw new Error('Invalid sponsorship requirement note.');
   for (const [name, fallback] of [['max_records',30],['max_excluded',5]]) {
     const value = config[name] ?? fallback;
     if (!Number.isInteger(value) || value < (name === 'max_records' ? 1 : 0) || value > 200) throw new Error('Invalid record limit.');
@@ -108,16 +109,20 @@ const positivePatterns = [
   /\b(?:we|company)\s+(?:will\s+|can\s+|may\s+)?sponsor\s+(?:work\s+|employment\s+)?visas?\b/gi,
   /\bvisa\s+sponsorship\s*:\s*yes\b/gi
 ];
+const temporarySponsorshipNotNeeded = /\bno\s+(?:(?:employment|work|visa|immigration)\s+)*sponsorship\s+(?:(?:is|will be)\s+)?(?:required|needed)\s+(?:during|on|while(?:\s+on)?)\s+(?:valid\s+|authorized\s+|STEM\s+)*(?:OPT|CPT)\b/gi;
 export function sponsorshipEvidence(description) {
   const negative = [], positive = [];
   for (const sentence of String(description).split(/(?<=[.!?])\s+|\n+/)) {
     const text = sentence.trim(); if (!text) continue;
-    if (negativePatterns.some(pattern=>pattern.test(text))) negative.push(text.slice(0,600));
+    // Normalize for matching only; preserve the employer's original quotes.
+    // Temporary OPT/CPT no-need language does not establish future H-1B support.
+    const matchingText = text.replace(/\bh[\s-]?1b(?:\s+visas?)?\b/gi,'visa').replace(temporarySponsorshipNotNeeded,'');
+    if (negativePatterns.some(pattern=>pattern.test(matchingText))) negative.push(text.slice(0,600));
     let offered = false;
     for (const pattern of positivePatterns) {
       pattern.lastIndex = 0;
-      for (const match of text.matchAll(pattern)) {
-        const prefix = text.slice(Math.max(0,match.index-60),match.index);
+      for (const match of matchingText.matchAll(pattern)) {
+        const prefix = matchingText.slice(Math.max(0,match.index-60),match.index);
         if (!/\b(?:not|no|cannot|can't|unable to|without)(?:\s+(?:currently|now|ever|able to|employment|work|immigration|visa)){0,5}\s*$/i.test(prefix)) offered = true;
       }
     }
@@ -170,7 +175,7 @@ export function screenJob(job, criteria, checkedAt) {
     sponsorship:sponsorship.label+(sponsorship.quotes.length?' Employer text: '+sponsorship.quotes.map(q=>'“'+q+'”').join(' | '):''),sponsorshipStatus:sponsorship.status,sponsorshipEvidence:sponsorship.quotes,
     finding:'Listed in the employer\'s public job feed at retrieval time. '+(exclusions.length?exclusions.join(' '):'This is a research lead, not a verified application-ready match.'),
     fit:reasons.join(' ')+' No candidate résumé was evaluated. Compensation, qualifications, and employer start-date compatibility are unverified.',
-    next:exclusions.length?'Do not apply under the current criteria. Review the stated exclusion before reconsidering.':'Review the full employer posting and confirm sponsorship, required experience, pay, and the requested start window before preparing an application.',
+    next:exclusions.length?'Do not apply under the current criteria. Review the stated exclusion and verify initial OPT/CPT acceptance for the role and work dates and future H-1B sponsorship before reconsidering.':'Review the full employer posting and verify initial OPT/CPT acceptance for the role and work dates, future H-1B sponsorship, required experience, pay, and the requested start window before preparing an application.',
     url:job.url,checkedAt:checkedAt.slice(0,10),retrievedAt:checkedAt,sourceType:'employer_feed',sourceId:job.sourceId,matchScore:exclusions.length?0:score,matchReasons:reasons,exclusionReasons:exclusions,verificationRequired:true};
 }
 export async function runResearch(config, previous, fetchImpl = fetch, trigger = 'manual', captureEvidence = null) {
@@ -216,7 +221,7 @@ export async function runResearch(config, previous, fetchImpl = fetch, trigger =
   const verify=records.filter(v=>v.category==='verify').length;
   const partial=automation.status==='partial'?' Some employer feeds failed; this is a partial search.':'';
   const report = {updatedAt:started.slice(0,10),mode:'Automated employer-feed research; applications require review',
-    scope:'Search criteria: '+(config.criteria.label||'configured business title families')+'; U.S. locations with '+((config.criteria.preferred_locations??[]).join(', ')||'no specific city')+' preferred. '+(config.criteria.sponsorship_required?'Sponsorship required. ':'Sponsorship is recorded without being an exclusion. ')+(config.criteria.start_window||'Start window is not confirmed.')+'. Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed.',
+    scope:'Search criteria: '+(config.criteria.label||'configured business title families')+'; U.S. locations with '+((config.criteria.preferred_locations??[]).join(', ')||'no specific city')+' preferred. '+(config.criteria.sponsorship_required?'Sponsorship required. ':'Sponsorship is recorded without being an exclusion. ')+((config.criteria.sponsorship_requirement_note??'').trim()?config.criteria.sponsorship_requirement_note.trim()+' ':'')+(config.criteria.start_window||'Start window is not confirmed.')+'. Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed.',
     summary:`Automatically retrieved ${jobs.length} job records from ${successful} of ${config.sources.length} employer feeds. Selected ${verify} leads for verification and ${records.length-verify} excluded examples; ${automation.stats.relevant} title-relevant records were screened before display limits. No candidate résumé was evaluated and no applications were submitted.`+partial,
     records,additionalSources:automation.sources.map(source=>({title:source.name+' — public '+source.provider+' feed',url:source.url,note:source.status==='ok'?`Retrieved ${source.fetched} records in this run.`:'Could not retrieve this feed: '+source.error})),automation};
   if(typeof captureEvidence==='function') {
