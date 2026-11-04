@@ -3,7 +3,7 @@
 ## Running
 
 - Supabase-native research worker, scheduled every six hours independently of this chat.
-- Six employer feeds with title/location/seniority/sponsorship screening, retrieval evidence, failures and cross-run deduplication. A verified complete run fetched 1,110 postings and recorded 30 leads for verification.
+- Six employer feeds with title/location/seniority/sponsorship/start-date screening, retrieval evidence, failures and cross-run deduplication. A verified complete run fetched 1,110 postings and recorded 30 leads for verification.
 - Scoped report publication, private archival, signed one-use invocations and protected original-posting evidence.
 - Dashboard code for overview, research, Automation, private applications/profile and connection tabs; GitHub Pages serves main/root.
 

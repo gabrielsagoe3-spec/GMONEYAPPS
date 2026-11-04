@@ -133,6 +133,71 @@ export function sponsorshipEvidence(description) {
   if (positive.length) return {status:'mentioned',label:'Sponsorship mentioned; H-1B eligibility is not confirmed',quotes:positive.slice(0,2)};
   return {status:'unknown',label:'Sponsorship not established by this posting',quotes:[]};
 }
+const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const startDatePattern = '\\b(?:(?<iso>\\d{4}-\\d{2}-\\d{2})|(?<month>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\.?\\s*(?:(?<day>\\d{1,2})(?:st|nd|rd|th)?[,\\s]+)?(?<year>\\d{4}))\\b';
+function isoDay(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const day = new Date(value+'T00:00:00Z');
+  return Number.isFinite(day.getTime()) && day.toISOString().slice(0,10) === value ? day : null;
+}
+export function startDateEvidence(description, availableFrom, checkedAt) {
+  // Keep this behavior in parity with automation/research_worker.py. No cohort
+  // year, graduation date, posting date or deadline supplies a work-start date.
+  const available = isoDay(availableFrom), observations = [], quotes = [];
+  let ambiguous = false;
+  for (const sentence of description.split(/(?<=[!?])\s+|(?<=\.)\s+(?=[A-Z])|\n+/)) {
+    const text = sentence.trim();
+    if (/\b(?:flexible|negotiable|alternative|later)\b[^\n.!?]{0,50}\b(?:start|timing)\b|\b(?:start\s+dates?|start\s+timing)\b[^\n.!?]{0,30}\b(?:flexible|negotiable)\b/i.test(text)) { ambiguous = true; quotes.push(text.slice(0,600)); }
+    for (const cue of text.matchAll(/\b(?:start(?:ing)?\s+date|start(?:s|ing)?(?:\s+work)?|(?:employment|work|role|position|program)\s+begins?)\b/gi)) {
+      const prefix = text.slice(0,cue.index).split(/[;.!?]/).at(-1);
+      if (/\b(?:applications?|deadlines?|postings?|posted|salary|graduat(?:ion|ing|es?)|projects?|benefits|interviews?|recruiting|health|coverage|insurance|pension|retirement|visa|sponsorship|training|orientation|onboarding|semester|classes?|courses?)\b/i.test(prefix)) continue;
+      const tail = text.slice(cue.index+cue[0].length);
+      const joined = tail.match(/^\s*(?::|[-–])?\s*(?:(?:is|will be|of|on|in|by|from|no later than)\s+)?/i);
+      const value = tail.slice(joined[0].length), token = new RegExp(startDatePattern,'i').exec(value);
+      const boundToken = token?.index === 0 ? token : null;
+      const immediate = /^(?:immediately|ASAP|as soon as possible)\b/i.test(value) || /\bimmediate\s*$/i.test(prefix);
+      if (!boundToken && !immediate) {
+        if (/\bdate\b/i.test(cue[0])) { ambiguous = true; quotes.push(text.slice(0,600)); }
+        continue;
+      }
+      quotes.push(text.slice(0,600));
+      const uncertain = /\b(?:not\s+(?:required|confirmed|guaranteed)|(?:must|need|do|does|should)\s+not|not\s+(?:a\s+)?must|no\s+longer\s+required|cannot\s+confirm|can't\s+confirm|to\s+be\s+(?:confirmed|determined)|TBD|tentative|possible|may\s+(?:start|be|change)|might|(?:other|separate)\s+(?:roles?|positions?|programs?))\b/i.test(text.replace(/as soon as possible/gi,''));
+      const dateCount = [...text.matchAll(new RegExp(startDatePattern,'gi'))].length;
+      const multiple = dateCount > 1 || (immediate && dateCount > 0);
+      const alternative = boundToken && /^\s*(?:[-–—/]|or\b|through\b|until\b|to\b|and\s+(?=\d|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))/i.test(value.slice(boundToken[0].length));
+      if (uncertain || multiple || alternative) { ambiguous = true; continue; }
+      const required = /\b(?:must(?:\s+be\s+(?:available|able|ready)\s+to)?|required(?:\s+to)?)\s*$/i.test(prefix);
+      const bound = /\b(?:by|no later than)\b/i.test(joined[0]) ? 'upper' : /\bfrom\b/i.test(joined[0]) ? 'lower' : 'fixed';
+      if (immediate) { observations.push(['immediate','immediate',required,'fixed']); continue; }
+      let first, last;
+      if (boundToken.groups.iso) first = last = isoDay(boundToken.groups.iso);
+      else {
+        const month = months.findIndex(name=>name.slice(0,3).toLowerCase() === boundToken.groups.month.slice(0,3).toLowerCase())+1;
+        const year = Number(boundToken.groups.year), day = boundToken.groups.day;
+        const stamp = (dayValue) => `${String(year).padStart(4,'0')}-${String(month).padStart(2,'0')}-${String(dayValue).padStart(2,'0')}`;
+        first = isoDay(stamp(day ? Number(day) : 1));
+        last = day ? first : isoDay(stamp(new Date(Date.UTC(year,month,0)).getUTCDate()));
+      }
+      if (!first || !last) { ambiguous = true; continue; }
+      observations.push([first.toISOString().slice(0,10),last.toISOString().slice(0,10),required,bound]);
+    }
+  }
+  const bounds = new Map(observations.map(([first,last,,bound])=>[`${first}|${last}|${bound}`,[first,last,bound]]));
+  let status = 'unknown', label = 'Employer start date is not established by explicit work-start wording; verify timing.';
+  if (ambiguous || bounds.size > 1) label = 'Employer start timing is ambiguous or conflicting; verify the role-specific start constraint.';
+  else if (available && observations.length) {
+    const [first,last,bound] = bounds.values().next().value, required = observations.some(item=>item[2]);
+    const checked = isoDay(checkedAt.slice(0,10));
+    const earlier = first === 'immediate' ? checked !== null && checked < available : bound !== 'lower' && last < availableFrom;
+    if (earlier) {
+      status = required ? 'required_earlier' : 'earlier';
+      label = required ? `The employer explicitly requires a start before availability from ${availableFrom}.` : `Employer start timing is earlier than availability from ${availableFrom}; timing needs review and employer flexibility is unverified.`;
+    } else if (first !== 'immediate' && bound !== 'upper' && first >= availableFrom) {
+      status = 'compatible'; label = `Explicit employer start timing is on or after ${availableFrom}; role-specific compatibility still needs review.`;
+    } else label = 'Employer start timing overlaps availability or is undated; verify the role-specific start constraint.';
+  }
+  return {status,label,quotes:[...new Set(quotes)].slice(0,2)};
+}
 const usCities = /\b(?:Houston|Austin|Dallas|San Francisco|New York|Boston|Chicago|Seattle|Denver|Atlanta|Los Angeles|San Diego|Phoenix|Miami|Washington|Palo Alto|Mountain View|Menlo Park|Salt Lake City|Charlotte|San Jose|Bellevue|Sunnyvale|Orlando|Tampa|Philadelphia|Nashville|Columbus|Raleigh|Pittsburgh)\b/i;
 const nonUs = /\b(?:United Kingdom|UK|Canada|Germany|France|India|Ireland|Australia|Japan|Singapore|Brazil|Mexico|Poland|Netherlands|Spain|Italy|Israel|London|Toronto|Vancouver|Berlin|Paris|Dublin|Bengaluru|Bangalore|Hyderabad|Mumbai|Sydney|Melbourne|Tokyo|Warsaw|Amsterdam|Madrid|Tel Aviv)\b/i;
 const usStates = /,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/;
@@ -170,12 +235,23 @@ export function screenJob(job, criteria, checkedAt) {
   const sponsorship = sponsorshipEvidence(job.description);
   if (criteria.sponsorship_required && sponsorship.status === 'not_offered') exclusions.push("The posting's no-sponsorship statement conflicts with the configured sponsorship requirement.");
   else if (sponsorship.status === 'mentioned') score += 5;
+  const start = startDateEvidence(job.description,criteria.available_from,checkedAt);
+  reasons.push(start.label+(start.quotes.length?' Employer text: '+start.quotes.map(quote=>'“'+quote+'”').join(' | '):''));
+  if (start.status === 'compatible') score += 40;
+  else if (start.status === 'required_earlier') exclusions.push(start.label);
+  else if (start.status === 'earlier') score -= 25;
+  const available = isoDay(criteria.available_from), cohort = job.title.match(/\b20\d{2}\b/);
+  if (start.status === 'unknown' && cohort && /\b(?:new grad(?:uate)?|graduate|early career|rotational|cohort|class of)\b/i.test(job.title)) {
+    reasons.push(`Unverified cohort-year signal in title: “${job.title.slice(0,200)}”; it does not establish a start date or graduation eligibility.`);
+    if (available && Number(cohort[0]) >= available.getUTCFullYear()) score += 2;
+  }
+  const disclosure = available ? `full-time availability from ${months[available.getUTCMonth()]} ${available.getUTCDate()}, ${available.getUTCFullYear()}` : 'your earliest available full-time start date';
   const category = exclusions.length ? 'excluded' : 'verify';
   return {id:job.id,company:job.company,title:job.title,location:job.location,decision:exclusions.length?'Ruled out':'Verify first',category,
     sponsorship:sponsorship.label+(sponsorship.quotes.length?' Employer text: '+sponsorship.quotes.map(q=>'“'+q+'”').join(' | '):''),sponsorshipStatus:sponsorship.status,sponsorshipEvidence:sponsorship.quotes,
     finding:'Listed in the employer\'s public job feed at retrieval time. '+(exclusions.length?exclusions.join(' '):'This is a research lead, not a verified application-ready match.'),
     fit:reasons.join(' ')+' No candidate résumé was evaluated. Compensation, qualifications, and employer start-date compatibility are unverified.',
-    next:exclusions.length?'Do not apply under the current criteria. Review the stated exclusion and verify initial OPT/CPT acceptance for the role and work dates and future H-1B sponsorship before reconsidering.':'Review the full employer posting and verify initial OPT/CPT acceptance for the role and work dates, future H-1B sponsorship, required experience, pay, and the requested start window before preparing an application.',
+    next:exclusions.length?'Do not apply under the current criteria. Review the stated exclusion and verify initial OPT/CPT acceptance for the role and work dates and future H-1B sponsorship before reconsidering.':`For an otherwise suitable role, you may apply while employer start timing is unconfirmed. When applying, disclose ${disclosure} and your expected graduation. Review the full employer posting and verify initial OPT/CPT acceptance for the role and work dates, future H-1B sponsorship, required experience, pay, graduation requirements, and employer start constraints.`,
     url:job.url,checkedAt:checkedAt.slice(0,10),retrievedAt:checkedAt,sourceType:'employer_feed',sourceId:job.sourceId,matchScore:exclusions.length?0:score,matchReasons:reasons,exclusionReasons:exclusions,verificationRequired:true};
 }
 export async function runResearch(config, previous, fetchImpl = fetch, trigger = 'manual', captureEvidence = null) {
