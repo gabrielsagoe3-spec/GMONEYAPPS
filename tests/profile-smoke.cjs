@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
   const server = http.createServer((req,res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
     const name = pathname === '/' ? 'index.html' : pathname.slice(1);
-    if (!['index.html','assets/app.css','assets/app.js','assets/config.js','assets/profile.js'].includes(name)) {res.writeHead(404).end();return;}
+    if (!['index.html','assets/app.css','assets/app.js','assets/config.js','assets/profile.js','assets/application-agent.js'].includes(name)) {res.writeHead(404).end();return;}
     res.setHeader('Content-Type',name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
     const source=fs.readFileSync(path.join(__dirname,'..',name));
     res.end(name==='assets/config.js' ? source.toString()+'\nwindow.GMONEY_DB.emailMode="code";' : source);
@@ -85,6 +85,7 @@ const assert = require('node:assert/strict');
         if(gate) await gate;
         return failDraftRead ? reply({},503) : reply(draftRows);
       }
+      if(url.includes('/rpc/get_application_workspace')) return reply({answers:[],connectors:[],jobs:[],reports:[],report_preferences:{local_time:'20:00',timezone:'America/Chicago',enabled:true,delivery:'dashboard'}});
       if(url.includes('/agent_preferences')) {
         assert.equal(req.headers().authorization,'Bearer test-access');
         if(req.method()==='POST') {if(failSave)return reply({},500);saved=req.postDataJSON();return route.fulfill({status:204});}
@@ -196,7 +197,7 @@ const assert = require('node:assert/strict');
     assert.equal(await card.isVisible(),true);
     assert.equal(await card.locator('h3').textContent(),draft.title);
     assert.match(await card.locator('.meta').textContent(),/Synthetic Employer · Houston, TX/);
-    assert.equal(await card.locator('.badge').textContent(),'Needs your answers · Not submitted');
+    assert.equal(await card.locator('.badge').textContent(),'Prepared draft');
     assert.equal(await card.locator('a').getAttribute('href'),draft.source_url);
     assert.equal(await card.locator('a').getAttribute('target'),'_blank');
     assert.match(await card.locator('a').getAttribute('rel'),/noopener/);
@@ -206,7 +207,7 @@ const assert = require('node:assert/strict');
     assert.deepEqual(await card.locator('li').allTextContents(),[...draft.match_notes,...draft.missing_answers]);
     assert.equal(await card.locator('img,script,b').count(),0);
     assert.equal(await page.evaluate(()=>window.__draftHtmlExecuted),undefined);
-    assert.match(await page.locator('#applicationDraftStatus').textContent(),/No applications have been submitted/);
+    assert.match(await page.locator('#applicationDraftStatus').textContent(),/See application activity below for actual outcomes and employer confirmations/);
     assert.equal(await page.locator('#applicationDraftCount').textContent(),'2 private drafts available');
     assert.equal(await cards.nth(1).locator('h3').textContent(),secondDraft.title);
     assert.equal(await cards.nth(1).locator('.meta').textContent(),secondDraft.company+' · '+secondDraft.location);

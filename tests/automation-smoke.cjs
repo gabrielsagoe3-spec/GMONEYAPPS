@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 (async () => {
-  const files = ['index.html','assets/app.css','assets/app.js','assets/config.js','assets/profile.js'];
+  const files = ['index.html','assets/app.css','assets/app.js','assets/config.js','assets/profile.js','assets/application-agent.js'];
   const server = http.createServer((req,res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
     const name = pathname === '/' ? 'index.html' : pathname.slice(1);

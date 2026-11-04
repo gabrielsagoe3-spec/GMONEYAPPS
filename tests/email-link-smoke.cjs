@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
   const server=http.createServer((req,res)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;
     const name=pathname==='/' ? 'index.html' : pathname.slice(1);
-    if(!['index.html','assets/app.css','assets/app.js','assets/config.js','assets/profile.js'].includes(name)) {res.writeHead(404).end();return;}
+    if(!['index.html','assets/app.css','assets/app.js','assets/config.js','assets/profile.js','assets/application-agent.js'].includes(name)) {res.writeHead(404).end();return;}
     res.setHeader('Content-Type',name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
     let source=fs.readFileSync(path.join(__dirname,'..',name),'utf8');
     if(name==='assets/config.js') source+='\nwindow.GMONEY_DB.emailMode="link";\n';
@@ -72,6 +72,7 @@ const assert = require('node:assert/strict');
           assert.equal(req.headers().authorization,'Bearer synthetic-link-access');
           state.drafts++;return reply([draft]);
         }
+        if(url.pathname.endsWith('/rpc/get_application_workspace')) return reply({answers:[],connectors:[],jobs:[],reports:[],report_preferences:{local_time:'20:00',timezone:'America/Chicago',enabled:true,delivery:'dashboard'}});
         if(url.pathname.endsWith('/agent_preferences')) {
           assert.equal(req.headers().authorization,'Bearer synthetic-link-access');
           return reply([importedProfile]);
