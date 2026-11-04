@@ -140,10 +140,15 @@ const assert = require('node:assert/strict');
     assert.doesNotMatch(await page.locator('#authStatus').textContent(),/Untrusted|SMTP secret/);
     otpFailure={status:429,body:{error_code:'over_email_send_rate_limit',msg:'Untrusted rate-limit detail'}};
     await page.locator('#emailForm button').click();
-    await page.waitForFunction(()=>document.getElementById('authStatus').textContent.includes('Wait at least a minute'));
+    await page.waitForFunction(()=>document.getElementById('authStatus').textContent.includes('hourly sending limit'));
+    assert.match(await page.locator('#authStatus').textContent(),/Refreshing this page will not reset.*up to an hour/);
+    assert.doesNotMatch(await page.locator('#authStatus').textContent(),/minute|default free|2 sign-in|Untrusted/);
     assert.equal(await page.locator('#emailForm button').isDisabled(),true);
+    assert.equal(await page.locator('#emailForm button').textContent(),'Email sending temporarily limited');
     assert.equal(await page.locator('#codeDestination').textContent(),'Enter the code sent to test@example.com.');
+    assert.equal(await page.locator('#loginCode').inputValue(),'87654321');
     await page.clock.fastForward(61000);
+    assert.equal(await page.locator('#emailForm button').textContent(),'Try once after the hourly limit resets');
     failOtpConnection=true;
     await page.locator('#emailForm button').click();
     await page.waitForFunction(()=>document.getElementById('authStatus').textContent.includes('Check your connection'));
@@ -229,6 +234,7 @@ const assert = require('node:assert/strict');
     assert.equal(await page.locator('#loginCode').inputValue(),'');
     assert.equal(await page.locator('#codeDestination').textContent(),'');
     assert.equal(await page.locator('#codeForm').isHidden(),true);
+    assert.equal(await page.locator('#emailForm button').textContent(),'Send sign-in code','session reset clears the hourly-limit flag');
     for(const fragment of [
       '#access_token=untrusted-url-access&refresh_token=untrusted-url-refresh&type=magiclink',
       '#error=access_denied&error_code=otp_expired&error_description=untrusted-url-error'

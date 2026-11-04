@@ -14,6 +14,7 @@
   let pendingEmail = '';
   let authAction = null;
   let resendAvailableAt = 0;
+  let emailSendLimited = false;
   let resendTimer;
   let profileReady = false;
   const fields = ['fullName', 'roles', 'instructions', 'locations', 'salary', 'sponsorship', 'resumeText'];
@@ -75,7 +76,9 @@
     const sendButton = el('emailForm').querySelector('button');
     sendButton.disabled = !!authAction || remaining > 0;
     const method = codeMode ? 'code' : 'link';
-    sendButton.textContent = remaining > 0 ? 'Send another ' + method + ' in ' + remaining + 's' : pendingEmail ? 'Send another sign-in ' + method : 'Send sign-in ' + method;
+    sendButton.textContent = emailSendLimited
+      ? remaining > 0 || authAction ? 'Email sending temporarily limited' : 'Try once after the hourly limit resets'
+      : remaining > 0 ? 'Send another ' + method + ' in ' + remaining + 's' : pendingEmail ? 'Send another sign-in ' + method : 'Send sign-in ' + method;
     el('accountEmail').disabled = !!authAction;
     el('codeForm').querySelector('button').disabled = !codeMode || !!authAction || !pendingEmail;
     el('loginCode').disabled = !!authAction;
@@ -96,6 +99,7 @@
     el('codeForm').hidden = true;
     pendingEmail = '';
     resendAvailableAt = 0;
+    emailSendLimited = false;
     el('loginCode').value = '';
     updateAuthControls();
     el('applicationDraftList').replaceChildren();
@@ -130,9 +134,26 @@
           const body = await response.json();
           code = typeof body?.code === 'string' ? body.code : body?.error_code;
         } catch {}
-        if (response.status === 429 || ['over_email_send_rate_limit', 'over_request_rate_limit'].includes(code)) {
+        const retryAfter = response.headers.get('Retry-After')?.trim();
+        let retryDelay = null;
+        if (retryAfter && /^\d+$/.test(retryAfter)) {
+          const delay = Number(retryAfter) * 1000;
+          if (Number.isSafeInteger(delay)) retryDelay = delay;
+        } else if (retryAfter && /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retryAfter)) {
+          const deadline = Date.parse(retryAfter);
+          if (Number.isFinite(deadline)) retryDelay = Math.max(0, deadline - Date.now());
+        }
+        if (code === 'over_email_send_rate_limit') {
+          const error = Error("The email provider's hourly sending limit has been reached. " +
+            (codeMode ? '' : 'The default free sender allows 2 sign-in emails per hour for this app. ') +
+            'Refreshing this page will not reset the limit. Wait for the hourly limit to reset, which can take up to an hour, then try once.');
+          error.emailSendLimited = true;
+          error.retrySendAfter = isOtpRequest ? retryDelay ?? 60000 : undefined;
+          throw error;
+        }
+        if (response.status === 429 || code === 'over_request_rate_limit') {
           const error = Error(isLinkExchange ? 'Too many attempts. Wait at least a minute, then request a new sign-in link.' : 'Too many attempts. Wait at least a minute before trying again.');
-          error.retrySendAfter = isOtpRequest ? 60000 : 0;
+          error.retrySendAfter = isOtpRequest ? retryDelay ?? 60000 : undefined;
           throw error;
         }
         if (isLinkExchange) throw Error(linkRecovery);
@@ -279,7 +300,8 @@
     try { await work(version); }
     catch (error) {
       if (generation !== version) return;
-      if (error.retrySendAfter) resendAvailableAt = Date.now() + error.retrySendAfter;
+      if (Number.isFinite(error.retrySendAfter)) resendAvailableAt = Date.now() + error.retrySendAfter;
+      if (error.emailSendLimited) emailSendLimited = true;
       el('authStatus').textContent = error.message;
     } finally {
       authAction = null;
@@ -295,6 +317,7 @@
       if (generation !== version) return;
       pendingEmail = requestedEmail;
       resendAvailableAt = Date.now() + 60000;
+      emailSendLimited = false;
       el('loginCode').value = '';
       el('codeForm').hidden = !codeMode;
       el('authStatus').textContent = codeMode
