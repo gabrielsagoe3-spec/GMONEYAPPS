@@ -19,6 +19,22 @@
   let profileReady = false;
   const fields = ['fullName', 'roles', 'instructions', 'locations', 'salary', 'sponsorship', 'resumeText'];
   const clearFields = () => { for (const id of fields) el(id).value = id === 'sponsorship' ? 'unspecified' : ''; };
+  const applicationRpcs = new Set(['get_application_workspace', 'save_application_answer', 'create_application_connector', 'revoke_application_connector', 'queue_application_draft', 'set_application_report_schedule']);
+  function announceProfileState() {
+    window.dispatchEvent(new CustomEvent('gmoney:profile-state', {detail:{ready:!!session && profileReady}}));
+  }
+  Object.defineProperty(window, 'GMONEY_APPLICATION_BRIDGE', {value:Object.freeze({
+    isReady:() => !!session && profileReady,
+    version:() => generation,
+    rpc:async (name, values = {}) => {
+      if (!applicationRpcs.has(name) || !session || !profileReady) throw Error('Sign in and load your private profile first.');
+      const version = generation, current = await activeSession();
+      if (version !== generation || !profileReady) throw Error('Your account changed. Reload your private workspace.');
+      const result = await request('/rest/v1/rpc/' + name, {method:'POST', body:JSON.stringify(values)}, current.access_token);
+      if (version !== generation || !profileReady) throw Error('Your account changed. Reload your private workspace.');
+      return result;
+    }
+  })});
   const base64url = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   function clearPendingLink() {
     try { localStorage.removeItem(linkStorageKey); }
@@ -107,6 +123,7 @@
     el('refreshApplicationDrafts').disabled = true;
     el('applicationDraftStatus').textContent = session ? 'Loading your private application drafts…' : 'Sign in to view your private application drafts.';
     try { if (value) sessionStorage.setItem(storageKey, JSON.stringify(value)); else sessionStorage.removeItem(storageKey); } catch { /* In-memory session remains usable. */ }
+    announceProfileState();
   }
   async function request(path, options = {}, token) {
     const isOtpRequest = path.split('?')[0] === '/auth/v1/otp';
@@ -208,7 +225,7 @@
       appendText(card, 'h3', draft.title || 'Application draft');
       const meta = appendText(card, 'p', [draft.company, draft.location].filter(Boolean).join(' · '));
       meta.className = 'meta';
-      const badge = appendText(card, 'span', 'Needs your answers · Not submitted');
+      const badge = appendText(card, 'span', 'Prepared draft');
       badge.className = 'badge';
       try {
         const url = new URL(draft.source_url);
@@ -232,6 +249,16 @@
         if (!list.childElementCount) appendText(list, 'li', 'Review is still required before applying.');
         card.append(list);
       }
+      const actions = document.createElement('div');
+      actions.className = 'draft-actions';
+      for (const [mode, label] of [['prepare', 'Prepare in Windows'], ['submit', 'Apply through Windows']]) {
+        const button = appendText(actions, 'button', label);
+        button.type = 'button'; button.className = mode === 'submit' ? 'primary' : 'text';
+        button.dataset.applicationMode = mode; button.dataset.draftId = draft.id;
+      }
+      const actionStatus = appendText(card, 'p', 'Windows must be connected. Unknown required answers will pause the application.');
+      actionStatus.className = 'draft-action-status'; actionStatus.setAttribute('role', 'status');
+      card.append(actions);
       const jump = document.createElement('button');
       jump.type = 'button';
       appendText(jump, 'span', ordinal).className = 'draft-number';
@@ -261,7 +288,7 @@
       if (!Array.isArray(drafts)) throw Error('Invalid application drafts.');
       renderApplicationDrafts(drafts);
       el('applicationDraftStatus').textContent = drafts.length
-        ? drafts.length + ' private application draft' + (drafts.length === 1 ? '' : 's') + ' loaded for your account. No applications have been submitted.'
+        ? drafts.length + ' private application draft' + (drafts.length === 1 ? '' : 's') + ' loaded for your account. See application activity below for actual outcomes and employer confirmations.'
         : 'No private application drafts were returned for this account. Refresh later to check for new drafts.';
     } catch {
       if (version !== generation) return;
@@ -301,6 +328,7 @@
         ? 'Your uploaded résumé is ready in your private profile. Review it before saving changes.'
         : rows.length ? 'Your saved profile is loaded.' : 'Ready for your first profile.';
       if (importUnavailable) el('saveStatus').textContent += ' Uploaded résumé import is unavailable; you can still edit and save this profile.';
+      announceProfileState();
       await readApplicationDrafts();
     } catch {
       if (version !== generation) return;
@@ -311,6 +339,7 @@
       el('refreshApplicationDrafts').disabled = true;
       el('authStatus').textContent = 'Could not load your profile. Reload to retry; editing is disabled to protect saved information.';
       el('applicationDraftStatus').textContent = 'Your profile could not be loaded. Reload to retry loading private application drafts.';
+      announceProfileState();
     }
   }
   async function busy(form, action, status) {

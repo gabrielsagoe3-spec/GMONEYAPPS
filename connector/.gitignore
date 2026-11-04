@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.env
+test-results/
+playwright-report/
+browser-profile/
+connector.token
+config.json
+*.pdf

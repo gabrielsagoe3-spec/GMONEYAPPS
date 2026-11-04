@@ -51,6 +51,8 @@ Direct feed requests from the coding environment still need the saved network ad
 
 The uploaded résumé is staged in a private table. Sign-in must verify its matching email before the résumé and candidate-specific drafts can be accessed. Drafts contain truthful summaries, cover letters, fit notes and explicit missing answers; they are not submission records. Existing profile edits are preserved during import. No emails, applications or employer messages have been sent by this setup.
 
+Application execution uses the separate [Windows MCP and browser worker](APPLICATION_CONNECTOR.md). Its private queue, scoped credentials, answer bank and receipt ledger are independent of the public research publisher. Nightly private dashboard reports are scheduled for 8:00 PM Houston time. The cloud can generate reports while Windows is off; local execution and Windows notifications require an installed, running worker.
+
 Default-provider email-link sign-in uses PKCE and the production site redirect; the user confirmed successful sign-in after the repair. Custom numeric-code templates require a separate SMTP provider, which is not configured. Supabase's built-in mail service has recipient and rate restrictions; reliable delivery to other addresses may require an approved SMTP provider. Do not disable email verification to bypass those restrictions.
 
 ## Validation
