@@ -20,7 +20,7 @@ Live manual and actual scheduled research runs returned HTTP 200. Database tests
 - No employer submission integration, continuous AI agent, LinkedIn/Indeed account access, Gmail reader or SMS integration is running. No applications or outreach were sent.
 - Research screening uses confirmed public search criteria, not automatic private résumé evaluation. Candidate-specific drafts are prepared privately with gaps made explicit.
 - Profile edits do not automatically change the scheduled search yet; confirm changes in chat.
-- Email-link sign-in uses browser-bound PKCE and the correct production redirect. A fresh end-user login after the repair is unverified; numeric-code templates require custom SMTP on the free project.
+- Email-link sign-in uses browser-bound PKCE and the correct production redirect; the user confirmed successful sign-in. Numeric-code templates require custom SMTP on the free project, and the default sender has a two-emails-per-hour limit.
 - Direct employer-feed access in this coding environment remains blocked until its saved network additions are applied. Production scheduling runs in Supabase and is already verified.
 
 See [AUTOMATION.md](AUTOMATION.md) for operations and [PRIVATE_PROFILE_SETUP.md](PRIVATE_PROFILE_SETUP.md) for profile activation details. Keep résumé contents, private drafts, contact information and keys out of source control and public reports.

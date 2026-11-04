@@ -102,8 +102,7 @@
     emailSendLimited = false;
     el('loginCode').value = '';
     updateAuthControls();
-    el('applicationDraftList').replaceChildren();
-    el('privateApplicationDrafts').hidden = true;
+    clearApplicationDrafts();
     el('applicationDraftSignIn').hidden = !!session;
     el('refreshApplicationDrafts').disabled = true;
     el('applicationDraftStatus').textContent = session ? 'Loading your private application drafts…' : 'Sign in to view your private application drafts.';
@@ -189,12 +188,23 @@
     parent.append(node);
     return node;
   }
-  function renderApplicationDrafts(drafts) {
+  function clearApplicationDrafts() {
     el('applicationDraftList').replaceChildren();
-    for (const draft of drafts) {
+    el('applicationDraftNavigation').replaceChildren();
+    el('applicationDraftCount').textContent = '';
+    el('privateApplicationDrafts').hidden = true;
+  }
+  function renderApplicationDrafts(drafts) {
+    clearApplicationDrafts();
+    const cards = document.createDocumentFragment();
+    const navigation = document.createDocumentFragment();
+    for (const [index, draft] of drafts.entries()) {
       if (!draft || draft.status !== 'needs_input') throw Error('Invalid application draft.');
       const card = document.createElement('article');
-      card.className = 'finding';
+      card.className = 'finding application-draft';
+      card.tabIndex = -1;
+      const ordinal = 'Draft ' + (index + 1) + ' of ' + drafts.length;
+      appendText(card, 'p', ordinal).className = 'draft-number';
       appendText(card, 'h3', draft.title || 'Application draft');
       const meta = appendText(card, 'p', [draft.company, draft.location].filter(Boolean).join(' · '));
       meta.className = 'meta';
@@ -208,6 +218,7 @@
           link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
         }
       } catch {}
+      appendText(card, 'p', 'Expand the sections below to view your tailored résumé summary and cover letter.').className = 'draft-hint';
       for (const [title, value] of [['Tailored résumé summary', draft.tailored_summary], ['Cover letter draft', draft.cover_letter]]) {
         const details = document.createElement('details');
         appendText(details, 'summary', title);
@@ -221,17 +232,28 @@
         if (!list.childElementCount) appendText(list, 'li', 'Review is still required before applying.');
         card.append(list);
       }
-      el('applicationDraftList').append(card);
+      const jump = document.createElement('button');
+      jump.type = 'button';
+      appendText(jump, 'span', ordinal).className = 'draft-number';
+      appendText(jump, 'span', [draft.company, draft.title || 'Application draft'].filter(Boolean).join(' · ')).className = 'draft-jump-label';
+      jump.onclick = () => {
+        card.scrollIntoView({block:'start'});
+        card.focus({preventScroll:true});
+      };
+      navigation.append(jump);
+      cards.append(card);
     }
+    el('applicationDraftList').append(cards);
+    el('applicationDraftNavigation').append(navigation);
+    el('applicationDraftCount').textContent = drafts.length ? drafts.length + ' private draft' + (drafts.length === 1 ? '' : 's') + ' available' : '';
     el('privateApplicationDrafts').hidden = drafts.length === 0;
   }
   async function readApplicationDrafts() {
     const version = generation;
     if (!session || !profileReady) return;
     el('refreshApplicationDrafts').disabled = true;
-    el('applicationDraftStatus').textContent = 'Loading your private application drafts…';
-    el('applicationDraftList').replaceChildren();
-    el('privateApplicationDrafts').hidden = true;
+    el('applicationDraftStatus').textContent = 'Loading your private application drafts and checking the available count…';
+    clearApplicationDrafts();
     try {
       const current = await activeSession();
       const drafts = await request('/rest/v1/rpc/list_candidate_application_drafts', {method:'POST', body:'{}'}, current.access_token);
@@ -239,13 +261,12 @@
       if (!Array.isArray(drafts)) throw Error('Invalid application drafts.');
       renderApplicationDrafts(drafts);
       el('applicationDraftStatus').textContent = drafts.length
-        ? drafts.length + ' private application drafts ready for review. No applications have been submitted.'
-        : 'No private application drafts are prepared for this account yet.';
+        ? drafts.length + ' private application draft' + (drafts.length === 1 ? '' : 's') + ' loaded for your account. No applications have been submitted.'
+        : 'No private application drafts were returned for this account. Refresh later to check for new drafts.';
     } catch {
       if (version !== generation) return;
-      el('applicationDraftList').replaceChildren();
-      el('privateApplicationDrafts').hidden = true;
-      el('applicationDraftStatus').textContent = 'Could not load your private drafts. Use Refresh private drafts to retry.';
+      clearApplicationDrafts();
+      el('applicationDraftStatus').textContent = 'Could not load your private drafts, so the available count is unknown. Use Refresh private drafts to retry.';
     } finally {
       if (version === generation && session) el('refreshApplicationDrafts').disabled = false;
     }
@@ -283,6 +304,11 @@
       await readApplicationDrafts();
     } catch {
       if (version !== generation) return;
+      profileReady = false;
+      clearFields();
+      el('profileFields').disabled = true;
+      clearApplicationDrafts();
+      el('refreshApplicationDrafts').disabled = true;
       el('authStatus').textContent = 'Could not load your profile. Reload to retry; editing is disabled to protect saved information.';
       el('applicationDraftStatus').textContent = 'Your profile could not be loaded. Reload to retry loading private application drafts.';
     }
