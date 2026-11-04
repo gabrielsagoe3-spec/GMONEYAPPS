@@ -37,7 +37,7 @@ const assert = require('node:assert/strict');
         for(const key of ['code','error','error_code','error_description','access_token','refresh_token']) assert.equal(frameURL.searchParams.has(key),false,'callback query must be scrubbed before backend requests');
         assert.doesNotMatch(frameURL.hash,/access_token|refresh_token|error_description/);
         assert.equal(req.headers().referer,undefined,'callback page must not send a referrer');
-        const reply=(body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
+        const reply=(body,status=200,headers={})=>route.fulfill({status,headers,contentType:'application/json',body:JSON.stringify(body)});
         if(url.pathname==='/auth/v1/otp') {
           assert.equal(req.method(),'POST');
           assert.equal(url.searchParams.get('redirect_to'),base+'/');
@@ -53,7 +53,7 @@ const assert = require('node:assert/strict');
           state.otp.push({body,record});
           const gate=state.otpGate;state.otpGate=null;if(gate) await gate;
           const failure=state.otpFailure;state.otpFailure=null;
-          return failure ? reply(failure.body,failure.status) : reply({});
+          return failure ? reply(failure.body,failure.status,failure.headers) : reply({});
         }
         if(url.pathname==='/auth/v1/token') {
           assert.equal(req.method(),'POST');assert.equal(url.searchParams.get('grant_type'),'pkce');
@@ -212,18 +212,58 @@ const assert = require('node:assert/strict');
     await page.clock.fastForward(61000);
     state.otpFailure={status:429,body:{error_code:'over_email_send_rate_limit',msg:'untrusted-private-rate-detail'}};
     await page.locator('#emailForm button').click();
-    await page.waitForFunction(()=>/wait at least a minute/i.test(document.getElementById('authStatus').textContent));
+    await page.waitForFunction(()=>/hourly sending limit/i.test(document.getElementById('authStatus').textContent));
+    const hourlyStatus=await page.locator('#authStatus').textContent();
+    assert.match(hourlyStatus,/default free sender allows 2 sign-in emails per hour/);
+    assert.match(hourlyStatus,/Refreshing this page will not reset/);
+    assert.match(hourlyStatus,/up to an hour/);
+    assert.doesNotMatch(hourlyStatus,/wait at least a minute|untrusted-private/i);
     assert.deepEqual(await readRecord(page),original);
     assert.equal(await page.locator('#emailForm button').isDisabled(),true);
+    assert.equal(await page.locator('#emailForm button').textContent(),'Email sending temporarily limited');
+    const blockedAttempts=state.otp.length;
+    await page.evaluate(()=>document.getElementById('emailForm').requestSubmit());
+    assert.equal(state.otp.length,blockedAttempts);
     await page.clock.fastForward(61000);
     assert.equal(await page.locator('#emailForm button').isDisabled(),false);
-    assert.doesNotMatch(await page.locator('#authStatus').textContent(),/untrusted-private/);
+    assert.equal(await page.locator('#emailForm button').textContent(),'Try once after the hourly limit resets');
+    assert.equal(state.otp.length,blockedAttempts,'waiting must not automatically request another email');
+
+    // Provider Retry-After headers control the local guard without promising a quota reset.
+    for(const format of ['seconds','date','invalid','zero']) {
+      const retryAfter=format==='date'
+        ? await page.evaluate(()=>new Date(Date.now()+120000).toUTCString())
+        : {seconds:'120',invalid:'not-a-retry-time',zero:'0'}[format];
+      state.otpFailure={status:429,headers:{'Retry-After':retryAfter,'Access-Control-Expose-Headers':'Retry-After'},body:{code:'over_email_send_rate_limit'}};
+      await page.locator('#emailForm button').click();
+      await page.waitForFunction(()=>!document.getElementById('accountEmail').disabled);
+      assert.deepEqual(await readRecord(page),original);
+      assert.doesNotMatch(await page.locator('#emailForm button').textContent(),/\d+s|minute/i);
+      if(format==='zero') {
+        assert.equal(await page.locator('#emailForm button').isDisabled(),false);
+      } else {
+        assert.equal(await page.locator('#emailForm button').isDisabled(),true);
+        await page.clock.fastForward(61000);
+        assert.equal(await page.locator('#emailForm button').isDisabled(),format!=='invalid',format+' Retry-After guard');
+        if(format!=='invalid') await page.clock.fastForward(60000);
+      }
+      assert.equal(await page.locator('#emailForm button').isDisabled(),false);
+      assert.equal(await page.locator('#emailForm button').textContent(),'Try once after the hourly limit resets');
+    }
     await page.locator('#emailForm button').click();
     await page.waitForFunction(()=>/check your email/i.test(document.getElementById('authStatus').textContent));
     const replacement=await readRecord(page);
     assert.equal(replacement.email,'changed@example.com');
     assert.notEqual(replacement.requestId,original.requestId);assert.notEqual(replacement.verifier,original.verifier);
     assert.equal(await page.locator('#codeForm').isHidden(),true);
+    assert.match(await page.locator('#emailForm button').textContent(),/^Send another link in \d+s$/,'successful send clears the hourly-limit flag');
+    await page.clock.fastForward(61000);
+    state.otpFailure={status:429,body:{error_code:'over_email_send_rate_limit_extra'}};
+    await page.locator('#emailForm button').click();
+    await page.waitForFunction(()=>/wait at least a minute/i.test(document.getElementById('authStatus').textContent));
+    assert.doesNotMatch(await page.locator('#authStatus').textContent(),/hourly|free sender/);
+    assert.match(await page.locator('#emailForm button').textContent(),/^Send another link in \d+s$/,'unknown rate codes use the generic guard');
+    assert.deepEqual(await readRecord(page),replacement);
     await context.close();
     assert.deepEqual(errors,[]);
     console.log('PASS: secure PKCE link request/challenge, same-tab and new-tab return, callback/referrer scrubbing, verifier expiry/validation, account binding, exchange rejection, failed-send restoration/rate limits, private profile/drafts and sign-out.');
