@@ -3,7 +3,7 @@
 The Windows connector supplies a real local MCP server and a browser worker. Installing it does not give this chat remote control of your computer or automatically add tools to ChatGPT. Register the server in a supported local MCP client, such as Codex CLI. A hosted ChatGPT custom connector is a separate connection.
 
 1. In the signed-in [Applications page](https://gabrielsagoe3-spec.github.io/GMONEYAPPS/#applications), create a Windows connector token. Copy that token once; keep the page open if setup needs it again. Do not use a Supabase administrator token.
-2. Download [GMoney-Windows-Connector.zip](https://github.com/gabrielsagoe3-spec/GMONEYAPPS/releases/latest/download/GMoney-Windows-Connector.zip), choose **Extract all**, open the extracted folder and double-click **Setup.cmd**. Keep its window open to read the result. No administrator shell is required. You can review `scripts/install-windows.ps1` before running it. If you prefer PowerShell, run:
+2. Download [GMoney-Windows-Connector.zip](https://gabrielsagoe3-spec.github.io/GMONEYAPPS/downloads/GMoney-Windows-Connector.zip), choose **Extract all**, open the extracted folder and double-click **Setup.cmd**. Keep its window open to read the result. No administrator shell is required. You can review `scripts/install-windows.ps1` before running it. If you prefer PowerShell, run:
 
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1

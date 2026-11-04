@@ -5,7 +5,7 @@ The application connector gives an MCP-capable Windows client tools for the priv
 ## Setup
 
 1. Sign in to [G Money Applications](https://gabrielsagoe3-spec.github.io/GMONEYAPPS/#applications) with the résumé's verified email. Create a Windows connector credential in the private connector panel. Keep that credential out of chat and GitHub.
-2. Download [G Money Windows Connector](https://github.com/gabrielsagoe3-spec/GMONEYAPPS/releases/latest/download/GMoney-Windows-Connector.zip), extract it, and follow its Windows setup instructions. The package includes the local MCP server and worker; Node.js and a browser download are required.
+2. Download [G Money Windows Connector](https://gabrielsagoe3-spec.github.io/GMONEYAPPS/downloads/GMoney-Windows-Connector.zip), extract it, and follow its Windows setup instructions. The package includes the local MCP server and worker; Node.js and a browser download are required.
 3. The installer asks for the scoped connector credential and a local copy of the résumé PDF. It protects the credential with Windows DPAPI for the current Windows account. It uses a dedicated browser profile rather than the personal Chrome profile.
 4. Register the local server in the Windows MCP client using the command or configuration printed by setup. The [connector guide](../connector/README.md) contains the exact paths, tools and troubleshooting steps. Registering it in that client does not attach it to this ChatGPT conversation.
 
@@ -37,3 +37,5 @@ python3 automation/application_admin.py disable-reports
 ```
 
 Enabling the report cron does not opt other accounts into reporting. Per-account preferences control the local time and enabled state. Existing research scheduling remains independent. Database rollback tests exercise owner isolation, scoped credentials and submission transitions; browser fixtures exercise form filling and receipt detection without applying to an employer. Windows-specific installation and notifications require verification on Windows.
+
+Run `python3 automation/package_windows_connector.py` after connector source changes and commit the regenerated `downloads/` ZIP and checksum with the source. The packager includes only the explicit installer/runtime file list, excluding tests, dependencies, credentials, browser profiles and candidate documents. GitHub Pages serves this code-only download directly.
