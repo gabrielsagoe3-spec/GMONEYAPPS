@@ -10,6 +10,10 @@ The hosted worker has completed live manual and automatic runs. A verified run r
 
 The source feeds are SoFi, Affirm, Datadog, HubSpot, Palantir and Wealthfront on Greenhouse/Lever. Matching is transparent rule-based screening, not a full résumé assessment. Unknown sponsorship and start dates remain verification tasks. The worker does not access LinkedIn/Indeed accounts or submit applications.
 
+Start-date screening compares explicit work-start wording with `criteria.available_from`. Compatible date evidence raises a lead's rank; earlier generic or immediate starts lower it. Only a clear mandatory earlier start excludes a role. Ambiguous dates, flexible timing, conflicting cues and future start deadlines remain unverified. Posting, application-deadline, graduation and benefit dates do not establish a work start. A cohort year in a title is only a weak, labeled signal. Date evidence and short employer quotes stay in the existing fit explanations; they do not verify graduation eligibility or work authorization.
+
+An unspecified employer start date does not prevent preparing or pursuing an otherwise suitable role. Applications should disclose actual expected graduation and earliest availability upfront. The system retains sponsorship, qualifications and location checks, and does not mark research leads as submitted applications.
+
 ## Runtime and security
 
 - `supabase/functions/gmoney-research/index.ts` fetches public feeds, normalizes descriptions, screens roles and publishes through `public.publish_automated_research`.

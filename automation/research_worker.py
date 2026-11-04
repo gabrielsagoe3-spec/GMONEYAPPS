@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from calendar import monthrange
+from datetime import date, datetime, timezone
 import fcntl
 from html import unescape
 from html.parser import HTMLParser
@@ -276,6 +277,100 @@ def sponsorship_evidence(description: str) -> dict[str, Any]:
     return {"status": "unknown", "label": "Sponsorship not established by this posting", "quotes": []}
 
 
+MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+START_DATE_TOKEN = re.compile(
+    r"\b(?:(?P<iso>\d{4}-\d{2}-\d{2})|(?P<month>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s*(?:(?P<day>\d{1,2})(?:st|nd|rd|th)?[,\s]+)?(?P<year>\d{4}))\b", re.I)
+START_CUE = re.compile(r"\b(?:start(?:ing)?\s+date|start(?:s|ing)?(?:\s+work)?|(?:employment|work|role|position|program)\s+begins?)\b", re.I)
+START_JOIN = re.compile(r"^\s*(?::|[-–])?\s*(?:(?:is|will be|of|on|in|by|from|no later than)\s+)?", re.I)
+FLEXIBLE_START = re.compile(r"\b(?:flexible|negotiable|alternative|later)\b[^\n.!?]{0,50}\b(?:start|timing)\b|\b(?:start\s+dates?|start\s+timing)\b[^\n.!?]{0,30}\b(?:flexible|negotiable)\b", re.I)
+
+
+def iso_day(value: Any) -> date | None:
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def start_date_evidence(description: str, available_from: Any, checked_at: str) -> dict[str, Any]:
+    """Compare only explicit work-start cues; never infer a date from a cohort year."""
+    available = iso_day(available_from)
+    unknown = "Employer start date is not established by explicit work-start wording; verify timing."
+    observations, quotes, ambiguous = [], [], False
+    # Keep month abbreviations such as "Jun. 1" together in both workers.
+    for sentence in re.split(r"(?<=[!?])\s+|(?<=\.)\s+(?=[A-Z])|\n+", description):
+        text = sentence.strip()
+        if FLEXIBLE_START.search(text):
+            ambiguous = True
+            quotes.append(text[:600])
+        for cue in START_CUE.finditer(text):
+            prefix = re.split(r"[;.!?]", text[:cue.start()])[-1]
+            # These dates concern recruiting, compensation or education, not work.
+            if re.search(r"\b(?:applications?|deadlines?|postings?|posted|salary|graduat(?:ion|ing|es?)|projects?|benefits|interviews?|recruiting|health|coverage|insurance|pension|retirement|visa|sponsorship|training|orientation|onboarding|semester|classes?|courses?)\b", prefix, re.I):
+                continue
+            tail = text[cue.end():]
+            joined = START_JOIN.match(tail)
+            value = tail[joined.end():]
+            token = START_DATE_TOKEN.match(value)
+            immediate = bool(re.match(r"(?:immediately|ASAP|as soon as possible)\b", value, re.I) or re.search(r"\bimmediate\s*$", prefix, re.I))
+            if not token and not immediate:
+                if re.search(r"\bdate\b", cue.group(0), re.I):
+                    ambiguous = True
+                    quotes.append(text[:600])
+                continue
+            quotes.append(text[:600])
+            uncertain = re.search(r"\b(?:not\s+(?:required|confirmed|guaranteed)|(?:must|need|do|does|should)\s+not|not\s+(?:a\s+)?must|no\s+longer\s+required|cannot\s+confirm|can't\s+confirm|to\s+be\s+(?:confirmed|determined)|TBD|tentative|possible|may\s+(?:start|be|change)|might|(?:other|separate)\s+(?:roles?|positions?|programs?))\b", re.sub(r"as soon as possible", "", text, flags=re.I), re.I)
+            date_count = len(list(START_DATE_TOKEN.finditer(text)))
+            multiple = date_count > 1 or (immediate and date_count > 0)
+            alternative = token and re.match(r"\s*(?:[-–—/]|or\b|through\b|until\b|to\b|and\s+(?=\d|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))", value[token.end():], re.I)
+            if uncertain or multiple or alternative:
+                ambiguous = True
+                continue
+            required = bool(re.search(r"\b(?:must(?:\s+be\s+(?:available|able|ready)\s+to)?|required(?:\s+to)?)\s*$", prefix, re.I))
+            bound = ("upper" if re.search(r"\b(?:by|no later than)\b", joined.group(0), re.I) else
+                     "lower" if re.search(r"\bfrom\b", joined.group(0), re.I) else "fixed")
+            if immediate:
+                observations.append(("immediate", "immediate", required, "fixed"))
+                continue
+            try:
+                if token.group("iso"):
+                    first = last = iso_day(token.group("iso"))
+                    if first is None:
+                        raise ValueError("Invalid employer date")
+                else:
+                    month = next(i for i, name in enumerate(MONTHS, 1) if name[:3].lower() == token.group("month")[:3].lower())
+                    year, day = int(token.group("year")), token.group("day")
+                    first = date(year, month, int(day) if day else 1)
+                    last = first if day else date(year, month, monthrange(year, month)[1])
+                observations.append((first.isoformat(), last.isoformat(), required, bound))
+            except ValueError:
+                ambiguous = True
+    quotes = list(dict.fromkeys(quotes))[:2]
+    bounds = {(first, last, bound) for first, last, _, bound in observations}
+    status, label = "unknown", unknown
+    if ambiguous or len(bounds) > 1:
+        label = "Employer start timing is ambiguous or conflicting; verify the role-specific start constraint."
+    elif available and observations:
+        first, last, bound = next(iter(bounds))
+        required = any(item[2] for item in observations)
+        if first == "immediate":
+            checked = iso_day(checked_at[:10])
+            earlier = checked is not None and checked < available
+        else:
+            earlier = bound != "lower" and last < available.isoformat()
+        if earlier:
+            status = "required_earlier" if required else "earlier"
+            label = (f"The employer explicitly requires a start before availability from {available_from}." if required else
+                     f"Employer start timing is earlier than availability from {available_from}; timing needs review and employer flexibility is unverified.")
+        elif first != "immediate" and bound != "upper" and first >= available.isoformat():
+            status, label = "compatible", f"Explicit employer start timing is on or after {available_from}; role-specific compatibility still needs review."
+        else:
+            label = "Employer start timing overlaps availability or is undated; verify the role-specific start constraint."
+    return {"status": status, "label": label, "quotes": quotes}
+
+
 US_CITIES = re.compile(r"\b(?:Houston|Austin|Dallas|San Francisco|New York|Boston|Chicago|Seattle|Denver|Atlanta|Los Angeles|San Diego|Phoenix|Miami|Washington|Palo Alto|Mountain View|Menlo Park|Salt Lake City|Charlotte|San Jose|Bellevue|Sunnyvale|Orlando|Tampa|Philadelphia|Nashville|Columbus|Raleigh|Pittsburgh)\b", re.I)
 US_STATES = r"AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY"
 NON_US = re.compile(r"\b(?:United Kingdom|UK|Canada|Germany|France|India|Ireland|Australia|Japan|Singapore|Brazil|Mexico|Poland|Netherlands|Spain|Italy|Israel|London|Toronto|Vancouver|Berlin|Paris|Dublin|Bengaluru|Bangalore|Hyderabad|Mumbai|Sydney|Melbourne|Tokyo|Warsaw|Amsterdam|Madrid|Tel Aviv)\b", re.I)
@@ -359,6 +454,21 @@ def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -
         exclusions.append("The posting's no-sponsorship statement conflicts with the configured sponsorship requirement.")
     elif sponsorship["status"] == "mentioned":
         score += 5
+    start = start_date_evidence(job["description"], criteria.get("available_from"), checked_at)
+    reasons.append(start["label"] + (" Employer text: " + " | ".join('“' + quote + '”' for quote in start["quotes"]) if start["quotes"] else ""))
+    if start["status"] == "compatible":
+        score += 40
+    elif start["status"] == "required_earlier":
+        exclusions.append(start["label"])
+    elif start["status"] == "earlier":
+        score -= 25
+    available = iso_day(criteria.get("available_from"))
+    cohort = re.search(r"\b20\d{2}\b", title)
+    if start["status"] == "unknown" and cohort and re.search(r"\b(?:new grad(?:uate)?|graduate|early career|rotational|cohort|class of)\b", title, re.I):
+        reasons.append(f'Unverified cohort-year signal in title: “{title[:200]}”; it does not establish a start date or graduation eligibility.')
+        if available and int(cohort.group(0)) >= available.year:
+            score += 2
+    disclosure = (f"full-time availability from {MONTHS[available.month - 1]} {available.day}, {available.year}" if available else "your earliest available full-time start date")
     category = "excluded" if exclusions else "verify"
     finding = "Listed in the employer's public job feed at retrieval time. "
     finding += " ".join(exclusions) if exclusions else "This is a research lead, not a verified application-ready match."
@@ -373,7 +483,7 @@ def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -
         "sponsorshipStatus": sponsorship["status"], "sponsorshipEvidence": sponsorship["quotes"],
         "finding": finding, "fit": fit,
         "next": ("Do not apply under the current criteria. Review the stated exclusion and verify initial OPT/CPT acceptance for the role and work dates and future H-1B sponsorship before reconsidering."
-                 if exclusions else "Review the full employer posting and verify initial OPT/CPT acceptance for the role and work dates, future H-1B sponsorship, required experience, pay, and the requested start window before preparing an application."),
+                 if exclusions else f"For an otherwise suitable role, you may apply while employer start timing is unconfirmed. When applying, disclose {disclosure} and your expected graduation. Review the full employer posting and verify initial OPT/CPT acceptance for the role and work dates, future H-1B sponsorship, required experience, pay, graduation requirements, and employer start constraints."),
         "url": job["url"], "checkedAt": checked_at[:10], "retrievedAt": checked_at,
         "sourceType": "employer_feed", "sourceId": job["sourceId"],
         "matchScore": 0 if exclusions else score,

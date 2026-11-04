@@ -1,14 +1,99 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createHmac} from 'node:crypto';
-import {boundedJson,createHandler,geography,invocationSignature,verifyInvocation,parseFeed,plainText,ResearchError,runResearch,safeUrl,screenJob,sponsorshipEvidence,validateConfig} from '../supabase/functions/gmoney-research/index.ts';
+import {createHash,createHmac} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
+import {boundedJson,createHandler,geography,invocationSignature,verifyInvocation,parseFeed,plainText,ResearchError,runResearch,safeUrl,screenJob,sponsorshipEvidence,startDateEvidence,validateConfig} from '../supabase/functions/gmoney-research/index.ts';
 
-const config=()=>({version:1,criteria:{label:'Business roles',country:'US',entry_level:true,sponsorship_required:true,sponsorship_requirement_note:'Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.',preferred_locations:['Houston'],role_patterns:['business analyst','operations coordinator','customer success','staff accountant'],start_window:'Available May 1, 2027 onward'},max_records:30,max_excluded:5,sources:[{provider:'greenhouse',board:'example',name:'Example Employer'}]});
+const config=()=>({version:1,criteria:{label:'Business roles',country:'US',entry_level:true,sponsorship_required:true,sponsorship_requirement_note:'Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.',preferred_locations:['Houston'],role_patterns:['business analyst','operations coordinator','customer success','staff accountant'],start_window:'Available May 1, 2027 onward',available_from:'2027-05-01'},max_records:30,max_excluded:5,sources:[{provider:'greenhouse',board:'example',name:'Example Employer'}]});
 const row=(extra={})=>({id:1,title:'Business Analyst',absolute_url:'https://example.com/jobs/1',location:{name:'Houston, TX'},content:'<p>Organize operations with Excel.</p>',...extra});
 const feed=rows=>new Response(JSON.stringify({jobs:rows}),{headers:{'Content-Type':'application/json'}});
 const env=()=>({SUPABASE_URL:'https://example.supabase.co',GMONEY_PUBLISHABLE_KEY:'public-test-key',GMONEY_RESEARCH_KEY:'publisher-test-key-with-long-random-like-content',GMONEY_RESEARCH_TRIGGER_KEY:'trigger-test-key-with-long-random-like-content',GMONEY_RESEARCH_CONFIG:JSON.stringify(config())});
 const invocation=(extra={})=>({nonce:'a'.repeat(64),issuedAt:Math.floor(Date.now()/1000),trigger:'manual',...extra});
 const request=async(settings,body=invocation())=>new Request('https://example.supabase.co/functions/v1/gmoney-research',{method:'POST',headers:{'x-gmoney-run-signature':await invocationSignature(settings.GMONEY_RESEARCH_TRIGGER_KEY,body.nonce,body.issuedAt,body.trigger)},body:JSON.stringify(body)});
+const dateCases = [
+ ['Start date: June 1, 2027.','compatible'], ['Starting June 2027.','compatible'],
+ ['Start date: 2027-05-01.','compatible'], ['Starting May 2027.','compatible'],
+ ['Start date: Jun. 1, 2027.','compatible'], ['Must start June 2027 and work in Houston.','compatible'],
+ ['Starting from June 2027.','compatible'], ['Must start from April 2027.','unknown'],
+ ['Start date: June 1, 2027. Applications close May 1, 2027.','compatible'],
+ ['Graduation must be between May 2027 and August 2027.','unknown'],
+ ['Posted 2027-05-01. Application deadline: June 1, 2027.','unknown'],
+ ['2027-06-01','unknown'], ['Applications starting June 2027.','unknown'],
+ ['Graduates starting June 2027.','unknown'], ['Starting salary: $70,000 in June 2027.','unknown'],
+ ['The project starts June 2027.','unknown'], ['Health coverage starts June 2027.','unknown'],
+ ['Our visa sponsorship program starts June 2027.','unknown'], ['Required training starts June 2027.','unknown'],
+ ['Start date: April 30, 2027.','earlier'], ['Starting April 2027.','earlier'],
+ ['Start immediately.','earlier'], ['Immediate start.','earlier'], ['Starting as soon as possible.','earlier'],
+ ['Candidates must start by April 30, 2027.','required_earlier'],
+ ['Candidates must be available to start April 1, 2027.','required_earlier'], ['Must start immediately.','required_earlier'],
+ ['Start date: June 1, 2027 or July 1, 2027.','unknown'],
+ ['Must start April 1, 2027. Start date: June 1, 2027.','unknown'],
+ ['Start date: June 1, 2027. Start immediately.','unknown'], ['Start immediately or June 1, 2027.','unknown'],
+ ['Start date: June 1, 2027 or later.','unknown'], ['Start date between April 1, 2027 and June 1, 2027.','unknown'],
+ ['Start date: February 30, 2027.','unknown'], ['Start date: 2027-02-30.','unknown'], ['Start date: TBD.','unknown'],
+ ['Applicants are not required to start April 1, 2027.','unknown'],
+ ['For other roles, candidates must start April 1, 2027.','unknown'],
+ ['Required start date: January 2027; alternative timing can be discussed.','unknown'],
+ ['Must start April 2027. Flexible start dates are available.','unknown'],
+ ['Start by July 1, 2027.','unknown'], ['Start date no later than June 2027.','unknown'],
+ ['Candidates must not start May 1, 2027.','unknown'], ['Do not start June 2027.','unknown'],
+ ['This is not a must start January 2027 requirement.','unknown'],
+ ["The requirement 'must start January 2027' does not apply.",'unknown'],
+ ['Starting May 2027.','unknown','2027-05-15'], ['Must start April 2027.','unknown','2027-04-15'],
+ ['Start date: May 15, 2027.','compatible','2027-05-15'],
+ ['Start immediately.','unknown','2027-05-01','2027-05-02'],
+];
+
+test('explicit start timing is conservative about context, deadlines, ambiguity and month boundaries',()=>{
+ const baseline=screenJob(parseFeed(config().sources[0],{jobs:[row()]}).jobs[0],config().criteria,'2026-11-02');
+ for(const [description,status,availableFrom='2027-05-01',checkedAt='2026-11-02'] of dateCases){
+  const evidence=startDateEvidence(description,availableFrom,checkedAt);
+  assert.equal(evidence.status,status,description);
+  const job=parseFeed(config().sources[0],{jobs:[row({content:description})]}).jobs[0];
+  const record=screenJob(job,{...config().criteria,available_from:availableFrom},checkedAt);
+  assert.equal(record.category,status==='required_earlier'?'excluded':'verify',description);
+  assert.equal(record.verificationRequired,true);assert.deepEqual(Object.keys(record).sort(),Object.keys(baseline).sort());
+  if(status==='compatible'){assert.ok(record.matchScore>baseline.matchScore,description);assert.match(record.fit,/role-specific compatibility still needs review/);}
+  if(status==='earlier'){assert.ok(record.matchScore<baseline.matchScore,description);assert.match(record.fit,/employer flexibility is unverified/);}
+  if(evidence.quotes.length)assert.ok(record.matchReasons.some(reason=>reason.includes('“'+evidence.quotes[0]+'”')),description);
+ }
+});
+
+test('cohort years stay weak and unverified while applications disclose actual availability',()=>{
+ const make=(title,content='')=>screenJob(parseFeed(config().sources[0],{jobs:[row({title,content})]}).jobs[0],config().criteria,'2026-11-02');
+ const baseline=make('New Graduate Business Analyst'),cohort=make('2027 New Graduate Business Analyst'),explicit=make('Business Analyst','Starting June 2027.');
+ assert.ok(cohort.matchScore>baseline.matchScore);assert.ok(cohort.matchScore<explicit.matchScore);
+ assert.match(cohort.fit,/Unverified cohort-year signal/);assert.match(cohort.fit,/does not establish a start date or graduation eligibility/);
+ assert.doesNotMatch(cohort.fit,/2027-01-01/);assert.match(cohort.next,/you may apply while employer start timing is unconfirmed/);
+ assert.match(cohort.next,/full-time availability from May 1, 2027/);assert.match(cohort.next,/your expected graduation/);assert.doesNotMatch(cohort.next,/before preparing/);
+});
+
+test('Python and Edge return identical start evidence and public records for timing cases',()=>{
+ const inputs=dateCases.map(([description,,availableFrom='2027-05-01',checkedAt='2026-11-02'])=>({
+  job:parseFeed(config().sources[0],{jobs:[row({content:description})]}).jobs[0],
+  criteria:{...config().criteria,available_from:availableFrom},checkedAt,
+ }));
+ inputs.push({job:parseFeed(config().sources[0],{jobs:[row({title:'2027 New Graduate Business Analyst'})]}).jobs[0],criteria:config().criteria,checkedAt:'2026-11-02'});
+ // Hash canonical full records so parity checks do not fill subprocess pipes.
+ const python=spawnSync('python3',['-c',"import hashlib, json, runpy, sys\nw = runpy.run_path('automation/research_worker.py')\nitems = json.loads(sys.argv[1])\nvalues = [{'evidence': w['start_date_evidence'](i['job']['description'], i['criteria']['available_from'], i['checkedAt']), 'record': w['screen_job'](i['job'], i['criteria'], i['checkedAt'])} for i in items]\nprint(json.dumps([hashlib.sha256(json.dumps(v, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest() for v in values]))",JSON.stringify(inputs)],{cwd:new URL('..',import.meta.url),stdio:['ignore','pipe','pipe'],encoding:'utf8',timeout:10000});
+ assert.equal(python.status,0,python.stderr||String(python.error));
+ const expected=JSON.parse(python.stdout);
+ const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+ inputs.forEach((input,index)=>{
+  const value={evidence:startDateEvidence(input.job.description,input.criteria.available_from,input.checkedAt),record:screenJob(input.job,input.criteria,input.checkedAt)};
+  assert.equal(createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex'),expected[index],input.job.description);
+ });
+});
+
+test('compatible start leads rank ahead of unknown and earlier starts without changing review status',async()=>{
+ const report=await runResearch(config(),{records:[]},async()=>feed([
+  row({id:1,content:'Start date: April 1, 2027.'}),
+  row({id:2,absolute_url:'https://example.com/jobs/2'}),
+  row({id:3,absolute_url:'https://example.com/jobs/3',location:{name:'Austin, TX'},content:'Starting June 2027.'}),
+  row({id:4,absolute_url:'https://example.com/jobs/4',content:'Must start April 1, 2027.'}),
+ ]));
+ assert.deepEqual(report.records.map(record=>record.id),[3,2,1,4].map(id=>'greenhouse-example-'+id));
+});
 
 test('extracts employer descriptions and discards executable URLs',()=>{
  assert.equal(plainText('&lt;p&gt;Business &amp;amp; operations&lt;/p&gt;<script>alert(1)</script>'),'Business & operations');

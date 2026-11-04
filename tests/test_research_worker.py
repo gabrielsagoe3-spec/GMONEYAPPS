@@ -24,7 +24,7 @@ def config():
         "criteria": {
             "label": "Entry-level analyst work", "role_patterns": ["business analyst", "operations analyst"],
             "preferred_locations": ["Houston"], "country": "US", "entry_level": True,
-            "sponsorship_required": True, "start_window": "From May 1, 2027 onward",
+            "sponsorship_required": True, "start_window": "From May 1, 2027 onward", "available_from": "2027-05-01",
             "sponsorship_requirement_note": "Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.",
         },
         "max_records": 30, "max_excluded": 5, "sources": [dict(GH)],
@@ -76,6 +76,100 @@ class FeedTests(unittest.TestCase):
 
 
 class ScreeningTests(unittest.TestCase):
+    def test_only_explicit_work_start_dates_are_ranked_with_source_quotes(self):
+        criteria = config()["criteria"]
+        baseline = worker.screen_job(job(), criteria, NOW)
+        for text in ["Start date: June 1, 2027.", "Starting June 2027.", "Start date: 2027-05-01.", "Starting May 2027.", "Start date: Jun. 1, 2027.", "Starting from June 2027."]:
+            with self.subTest(text=text):
+                result = worker.screen_job(job(content=text), criteria, NOW)
+                self.assertGreater(result["matchScore"], baseline["matchScore"])
+                self.assertIn("Explicit employer start timing is on or after 2027-05-01", result["fit"])
+                self.assertIn('“' + text + '”', result["fit"])
+                self.assertEqual(result["category"], "verify")
+                self.assertTrue(result["verificationRequired"])
+                self.assertIn("qualifications", result["fit"])
+        result = worker.screen_job(job(content="Start date: June 1, 2027. Applications close May 1, 2027."), criteria, NOW)
+        self.assertGreater(result["matchScore"], baseline["matchScore"])
+
+    def test_graduation_posting_deadline_and_other_dates_do_not_supply_start_dates(self):
+        criteria = config()["criteria"]
+        baseline = worker.screen_job(job(), criteria, NOW)
+        for text in [
+            "Graduation must be between May 2027 and August 2027.",
+            "Posted 2027-05-01. Application deadline: June 1, 2027.",
+            "2027-06-01", "Applications starting June 2027.",
+            "Graduates starting June 2027.", "Starting salary: $70,000 in June 2027.",
+            "The project starts June 2027.",
+            "Health coverage starts June 2027.", "Our visa sponsorship program starts June 2027.",
+            "Required training starts June 2027.",
+        ]:
+            with self.subTest(text=text):
+                evidence = worker.start_date_evidence(text, "2027-05-01", NOW)
+                self.assertEqual(evidence["status"], "unknown")
+                self.assertEqual(evidence["quotes"], [])
+                result = worker.screen_job(job(content=text), criteria, NOW)
+                self.assertEqual(result["category"], "verify")
+                self.assertEqual(result["matchScore"], baseline["matchScore"])
+
+    def test_earlier_start_requires_review_unless_explicitly_mandatory(self):
+        criteria = config()["criteria"]
+        baseline = worker.screen_job(job(), criteria, NOW)
+        for text in ["Start date: April 30, 2027.", "Starting April 2027.", "Start immediately.", "Immediate start.", "Starting as soon as possible."]:
+            with self.subTest(text=text):
+                result = worker.screen_job(job(content=text), criteria, NOW)
+                self.assertEqual(result["category"], "verify")
+                self.assertLess(result["matchScore"], baseline["matchScore"])
+                self.assertIn("employer flexibility is unverified", result["fit"])
+                self.assertIn('“' + text + '”', result["fit"])
+        for text in ["Candidates must start by April 30, 2027.", "Candidates must be available to start April 1, 2027.", "Must start immediately."]:
+            with self.subTest(text=text):
+                result = worker.screen_job(job(content=text), criteria, NOW)
+                self.assertEqual(result["category"], "excluded")
+                self.assertIn("explicitly requires a start before", " ".join(result["exclusionReasons"]))
+        self.assertEqual(worker.start_date_evidence("Start immediately.", "2027-05-01", "2027-05-02")["status"], "unknown")
+
+    def test_ambiguous_invalid_and_month_boundary_dates_remain_unverified(self):
+        for text in [
+            "Start date: June 1, 2027 or July 1, 2027.",
+            "Must start April 1, 2027. Start date: June 1, 2027.",
+            "Start date: June 1, 2027. Start immediately.",
+            "Start immediately or June 1, 2027.",
+            "Start date: June 1, 2027 or later.",
+            "Start date between April 1, 2027 and June 1, 2027.",
+            "Start date: February 30, 2027.", "Start date: 2027-02-30.",
+            "Start date: TBD.", "Applicants are not required to start April 1, 2027.",
+            "For other roles, candidates must start April 1, 2027.",
+            "Required start date: January 2027; alternative timing can be discussed.",
+            "Must start April 2027. Flexible start dates are available.",
+            "Start by July 1, 2027.", "Start date no later than June 2027.",
+            "Candidates must not start May 1, 2027.", "Do not start June 2027.",
+            "This is not a must start January 2027 requirement.",
+            "The requirement 'must start January 2027' does not apply.",
+            "Must start from April 2027.",
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(worker.start_date_evidence(text, "2027-05-01", NOW)["status"], "unknown")
+                self.assertEqual(worker.screen_job(job(content=text), config()["criteria"], NOW)["category"], "verify")
+        self.assertEqual(worker.start_date_evidence("Starting May 2027.", "2027-05-15", NOW)["status"], "unknown")
+        self.assertEqual(worker.start_date_evidence("Must start April 2027.", "2027-04-15", NOW)["status"], "unknown")
+        self.assertEqual(worker.start_date_evidence("Start date: May 15, 2027.", "2027-05-15", NOW)["status"], "compatible")
+
+    def test_cohort_year_is_only_a_weak_unverified_signal_and_application_discloses_availability(self):
+        criteria = config()["criteria"]
+        baseline = worker.screen_job(job(title="New Graduate Business Analyst"), criteria, NOW)
+        cohort = worker.screen_job(job(title="2027 New Graduate Business Analyst"), criteria, NOW)
+        explicit = worker.screen_job(job(content="Starting June 2027."), criteria, NOW)
+        self.assertGreater(cohort["matchScore"], baseline["matchScore"])
+        self.assertLess(cohort["matchScore"], explicit["matchScore"])
+        self.assertIn("Unverified cohort-year signal", cohort["fit"])
+        self.assertIn("does not establish a start date or graduation eligibility", cohort["fit"])
+        self.assertNotIn("2027-01-01", cohort["fit"])
+        self.assertIn("you may apply while employer start timing is unconfirmed", cohort["next"])
+        self.assertIn("full-time availability from May 1, 2027", cohort["next"])
+        self.assertIn("your expected graduation", cohort["next"])
+        self.assertNotIn("before preparing", cohort["next"])
+        self.assertEqual(set(cohort), set(baseline))
+
     def test_confirmed_business_search_covers_multiple_early_career_functions(self):
         criteria = json.loads((ROOT / "automation" / "config.json").read_text())["criteria"]
         titles = [
@@ -234,6 +328,15 @@ class ScreeningTests(unittest.TestCase):
 
 
 class RunTests(unittest.TestCase):
+    def test_compatible_start_leads_outrank_unknown_and_earlier_starts(self):
+        rows = {"jobs": [gh_row(1, content="Start date: April 1, 2027."), gh_row(2),
+                         gh_row(3, location="Austin, TX", content="Starting June 2027."),
+                         gh_row(4, content="Must start April 1, 2027.")]}
+        with patch.object(worker, "fetch_json", return_value=rows):
+            report = worker.run_research(config())
+        self.assertEqual([record["id"] for record in report["records"]],
+                         [f"greenhouse-example-{number}" for number in (3, 2, 1, 4)])
+
     def test_report_scope_explains_both_authorization_requirements(self):
         cfg = config()
         with patch.object(worker, "fetch_json", return_value={"jobs": [gh_row()]}):
