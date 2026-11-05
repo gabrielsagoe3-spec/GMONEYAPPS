@@ -5,6 +5,7 @@ export const questionKey = (text,jobId) => 'question_'+createHash('sha256').upda
 const aliases = new Map(Object.entries({
   full_name:['full name','candidate name'],first_name:['first name','given name'],last_name:['last name','surname','family name'],
   email:['email','email address'],phone:['phone','phone number','telephone','telephone number'],
+  postal_code:['zip','zip code','zipcode','postal code','postalcode'],
   available_start_date:['available start date','earliest start date','available from','when can you start'],
   expected_graduation:['expected graduation','expected graduation date'],
   requires_sponsorship:['will you now or in the future require sponsorship for employment visa status','will you now or in the future require visa sponsorship','will you require h1b sponsorship in the future','will you require h 1b sponsorship in the future']

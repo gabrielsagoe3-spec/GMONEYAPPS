@@ -40,6 +40,7 @@ export function validateConfig(config) {
   const criteria = config.criteria;
   if (!Array.isArray(criteria.role_patterns) || !criteria.role_patterns.length || criteria.role_patterns.some(v=>typeof v !== 'string' || !v.trim() || v.length > 1000)) throw new Error('Invalid role criteria.');
   if (!Array.isArray(criteria.preferred_locations ?? []) || (criteria.preferred_locations ?? []).some(v=>typeof v !== 'string')) throw new Error('Invalid location criteria.');
+  if (criteria.required_location_scope != null && criteria.required_location_scope !== 'houston_metro') throw new Error('Unsupported required location scope.');
   if (typeof criteria.entry_level !== 'boolean' || typeof criteria.sponsorship_required !== 'boolean') throw new Error('Invalid screening criteria.');
   if (typeof (criteria.sponsorship_requirement_note ?? '') !== 'string' || (criteria.sponsorship_requirement_note ?? '').length > 500) throw new Error('Invalid sponsorship requirement note.');
   for (const [name, fallback] of [['max_records',30],['max_excluded',5]]) {
@@ -201,6 +202,27 @@ export function startDateEvidence(description, availableFrom, checkedAt) {
 const usCities = /\b(?:Houston|Austin|Dallas|San Francisco|New York|Boston|Chicago|Seattle|Denver|Atlanta|Los Angeles|San Diego|Phoenix|Miami|Washington|Palo Alto|Mountain View|Menlo Park|Salt Lake City|Charlotte|San Jose|Bellevue|Sunnyvale|Orlando|Tampa|Philadelphia|Nashville|Columbus|Raleigh|Pittsburgh)\b/i;
 const nonUs = /\b(?:United Kingdom|UK|Canada|Germany|France|India|Ireland|Australia|Japan|Singapore|Brazil|Mexico|Poland|Netherlands|Spain|Italy|Israel|London|Toronto|Vancouver|Berlin|Paris|Dublin|Bengaluru|Bangalore|Hyderabad|Mumbai|Sydney|Melbourne|Tokyo|Warsaw|Amsterdam|Madrid|Tel Aviv)\b/i;
 const usStates = /,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/;
+const houstonPlaces = /\b(?:The Woodlands|Missouri City|Sugar ?Land|League City|Fort Bend County|Harris County|Houston|Stafford|Rosenberg|Pearland|Katy|Cypress|Spring|Humble|Pasadena|Richmond|Bellaire)\b/gi;
+export function houstonMetroLocation(job) {
+  // Use the employer's role-location field, not company/HQ prose or a home ZIP.
+  const country = (job.country ?? '').trim().toUpperCase(), location = job.location.trim();
+  if (country && !['US','USA','UNITED STATES','UNITED STATES OF AMERICA'].includes(country)) return false;
+  if (/\b(?:Houston\s+County|street|st|road|rd|avenue|ave|boulevard|blvd|drive|dr|headquarters|hq)\b/i.test(location)) return false;
+  if (/\bremote\s*[,(/–—-]?\s*(?:US|USA|United States|Texas|TX)\b/i.test(location)) return false;
+  const places = [...location.matchAll(houstonPlaces)];
+  if (!places.length) return false;
+  const texas = /\b(?:TX|Texas)\b/i.test(location);
+  if (!texas && places.some(place=>!/^Houston$|^Sugar ?Land$/i.test(place[0]))) return false;
+  const remainder = location.replace(houstonPlaces,' ')
+    .replace(/\bU\.S\.(?:A\.)?/gi,' ')
+    .replace(/\b(?:United States(?: of America)?|USA?|Texas|TX|greater|metropolitan|metro|area|remote|hybrid|on[ -]?site|in[ -]office|office|work from home|downtown|uptown|north|south|east|west|central|northeast|northwest|southeast|southwest|heights|galleria|energy corridor|memorial|medical center)\b/gi,' ');
+  return !/[\p{L}\p{N}_]/u.test(remainder);
+}
+function locationScopeText(criteria) {
+  return criteria.required_location_scope === 'houston_metro'
+    ? 'Houston metro only: Houston, Stafford, Sugar Land and nearby named Houston-area locations. Generic U.S./Texas remote and other locations are omitted unless the role explicitly lists a named local location. '
+    : 'U.S. locations with '+((criteria.preferred_locations??[]).join(', ')||'no specific city')+' preferred. ';
+}
 export function geography(job) {
   const country = job.country.trim().toUpperCase();
   if (['US','USA','UNITED STATES','UNITED STATES OF AMERICA'].includes(country)) return 'us';
@@ -210,9 +232,11 @@ export function geography(job) {
   return usCities.test(job.location) ? 'us' : 'unknown';
 }
 export function screenJob(job, criteria, checkedAt) {
+  if (criteria.required_location_scope === 'houston_metro' && !houstonMetroLocation(job)) return null;
   const matched = criteria.role_patterns.filter(phrase=>job.title.toLowerCase().includes(phrase.toLowerCase()));
   if (!matched.length || /\b(?:engineer|developer|scientist|architect)\b/i.test(job.title)) return null;
   let score = 30; const exclusions = [], reasons = [`Title matches the configured '${matched[0]}' role family.`];
+  if (criteria.required_location_scope === 'houston_metro') reasons.push('The employer location field names a Houston-area role location; exact work-location conditions still need review.');
   let senior = job.title.match(/\b(?:senior|sr\.?|principal|lead|director|head|vice president|vp|chief)\b/i);
   if (!senior && /\bstaff\b/i.test(job.title) && !/\bstaff accountant\b/i.test(job.title)) senior = job.title.match(/\bstaff\b/i);
   if (!senior) senior = job.title.replace(/\b(?:account|customer success) manager\b/gi,'').match(/\bmanager\b/i);
@@ -296,9 +320,10 @@ export async function runResearch(config, previous, fetchImpl = fetch, trigger =
   if(automation.status==='partial'&&!records.length){automation.status='failed';throw new ResearchError('Incomplete source coverage produced no selected findings; previous report was preserved.',automation);}
   const verify=records.filter(v=>v.category==='verify').length;
   const partial=automation.status==='partial'?' Some employer feeds failed; this is a partial search.':'';
+  const relevance=config.criteria.required_location_scope==='houston_metro'?'Houston-area title-relevant':'title-relevant';
   const report = {updatedAt:started.slice(0,10),mode:'Automated employer-feed research; applications require review',
-    scope:'Search criteria: '+(config.criteria.label||'configured business title families')+'; U.S. locations with '+((config.criteria.preferred_locations??[]).join(', ')||'no specific city')+' preferred. '+(config.criteria.sponsorship_required?'Sponsorship required. ':'Sponsorship is recorded without being an exclusion. ')+((config.criteria.sponsorship_requirement_note??'').trim()?config.criteria.sponsorship_requirement_note.trim()+' ':'')+(config.criteria.start_window||'Start window is not confirmed.')+'. Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed.',
-    summary:`Automatically retrieved ${jobs.length} job records from ${successful} of ${config.sources.length} employer feeds. Selected ${verify} leads for verification and ${records.length-verify} excluded examples; ${automation.stats.relevant} title-relevant records were screened before display limits. No candidate résumé was evaluated and no applications were submitted.`+partial,
+    scope:'Search criteria: '+(config.criteria.label||'configured business title families')+'. '+locationScopeText(config.criteria)+(config.criteria.sponsorship_required?'Sponsorship required. ':'Sponsorship is recorded without being an exclusion. ')+((config.criteria.sponsorship_requirement_note??'').trim()?config.criteria.sponsorship_requirement_note.trim()+' ':'')+(config.criteria.start_window||'Start window is not confirmed.')+'. Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed.',
+    summary:`Automatically retrieved ${jobs.length} job records from ${successful} of ${config.sources.length} employer feeds. Selected ${verify} leads for verification and ${records.length-verify} excluded examples; ${automation.stats.relevant} ${relevance} records were screened before display limits. No candidate résumé was evaluated and no applications were submitted.`+partial,
     records,additionalSources:automation.sources.map(source=>({title:source.name+' — public '+source.provider+' feed',url:source.url,note:source.status==='ok'?`Retrieved ${source.fetched} records in this run.`:'Could not retrieve this feed: '+source.error})),automation};
   if(typeof captureEvidence==='function') {
     const evidence=records.map(record=>{

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,createHmac} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {boundedJson,createHandler,geography,invocationSignature,verifyInvocation,parseFeed,plainText,ResearchError,runResearch,safeUrl,screenJob,sponsorshipEvidence,startDateEvidence,validateConfig} from '../supabase/functions/gmoney-research/index.ts';
+import {boundedJson,createHandler,geography,houstonMetroLocation,invocationSignature,verifyInvocation,parseFeed,plainText,ResearchError,runResearch,safeUrl,screenJob,sponsorshipEvidence,startDateEvidence,validateConfig} from '../supabase/functions/gmoney-research/index.ts';
 
 const config=()=>({version:1,criteria:{label:'Business roles',country:'US',entry_level:true,sponsorship_required:true,sponsorship_requirement_note:'Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.',preferred_locations:['Houston'],role_patterns:['business analyst','operations coordinator','customer success','staff accountant'],start_window:'Available May 1, 2027 onward',available_from:'2027-05-01'},max_records:30,max_excluded:5,sources:[{provider:'greenhouse',board:'example',name:'Example Employer'}]});
 const row=(extra={})=>({id:1,title:'Business Analyst',absolute_url:'https://example.com/jobs/1',location:{name:'Houston, TX'},content:'<p>Organize operations with Excel.</p>',...extra});
@@ -10,6 +10,49 @@ const feed=rows=>new Response(JSON.stringify({jobs:rows}),{headers:{'Content-Typ
 const env=()=>({SUPABASE_URL:'https://example.supabase.co',GMONEY_PUBLISHABLE_KEY:'public-test-key',GMONEY_RESEARCH_KEY:'publisher-test-key-with-long-random-like-content',GMONEY_RESEARCH_TRIGGER_KEY:'trigger-test-key-with-long-random-like-content',GMONEY_RESEARCH_CONFIG:JSON.stringify(config())});
 const invocation=(extra={})=>({nonce:'a'.repeat(64),issuedAt:Math.floor(Date.now()/1000),trigger:'manual',...extra});
 const request=async(settings,body=invocation())=>new Request('https://example.supabase.co/functions/v1/gmoney-research',{method:'POST',headers:{'x-gmoney-run-signature':await invocationSignature(settings.GMONEY_RESEARCH_TRIGGER_KEY,body.nonce,body.issuedAt,body.trigger)},body:JSON.stringify(body)});
+const houstonCases = [
+ ...['Houston','Houston, TX','Greater Houston Area','Houston, Texas, United States','Stafford, TX','Sugar Land','Sugar Land, TX','Missouri City, Texas','Rosenberg, TX','Pearland, TX','Katy, TX','Cypress, TX','Spring, TX','The Woodlands, TX','Humble, TX','Pasadena, TX','Richmond, TX','Bellaire, TX','League City, TX','Fort Bend County, TX','Harris County, TX','Remote — Houston, TX','Houston / Sugar Land, TX','United States - Texas - Katy'].map(location=>({location,expected:true})),
+ ...['Houston, MS','Houston Street, New York','500 Houston St, Austin, TX','Spring, NY','Cypress, CA','Richmond, VA','Stafford, VA','Pasadena, CA','Springfield, TX','Sugar Land Road, Dallas, TX','Remote US','Remote Texas','United States','Texas','Houston, TX / Boston, MA','HQ: Houston, TX','Remote US (Houston office)','Houston County, TX','Stafford','Spring','Cypress','Houston, TX / Remote US','Houston, TX / London, UK'].map(location=>({location,expected:false})),
+ {location:'Houston, TX',country:'CA',expected:false},
+];
+
+test('required Houston scope uses explicit local role metadata and rejects ambiguous names or generic remote',()=>{
+ const criteria={...config().criteria,required_location_scope:'houston_metro'};
+ for(const entry of houstonCases){
+  const job=parseFeed(config().sources[0],{jobs:[row({location:{name:entry.location},country:entry.country,content:'Our company headquarters is in Houston, Texas.'})]}).jobs[0];
+  assert.equal(houstonMetroLocation(job),entry.expected,entry.location);
+  const result=screenJob(job,criteria,'2026-11-02');
+  assert.equal(result!==null,entry.expected,entry.location);
+  if(result){assert.match(result.fit,/Houston-area role location/);assert.equal(result.verificationRequired,true);}
+ }
+ assert.notEqual(screenJob(parseFeed(config().sources[0],{jobs:[row({location:{name:'Boston, MA'}})]}).jobs[0],config().criteria,'2026-11-02'),null);
+ assert.throws(()=>validateConfig({...config(),criteria:{...config().criteria,required_location_scope:'anywhere'}}));
+});
+
+test('Houston-only reports omit nonlocal excluded examples and retain honest completed empty results',async()=>{
+ const scoped={...config(),criteria:{...config().criteria,required_location_scope:'houston_metro'}};
+ const report=await runResearch(scoped,{records:[]},async()=>feed([
+  row({id:1,location:{name:'Boston, MA'},content:'No visa sponsorship is available.'}),
+  row({id:2,absolute_url:'https://example.com/jobs/2',location:{name:'Stafford, TX'}}),
+  row({id:3,absolute_url:'https://example.com/jobs/3',location:{name:'Remote US'}}),
+ ]));
+ assert.deepEqual(report.records.map(record=>record.id),['greenhouse-example-2']);
+ assert.match(report.scope,/Houston metro only/);assert.doesNotMatch(report.scope,/preferred/);
+ assert.match(report.summary,/Houston-area title-relevant/);
+ assert.match(report.records[0].next,/May 1, 2027/);assert.match(report.records[0].next,/future H-1B sponsorship/);
+ const empty=await runResearch(scoped,{records:[]},async()=>feed([row({location:{name:'Remote US'}})]));
+ assert.deepEqual(empty.records,[]);assert.equal(empty.automation.status,'completed');
+});
+
+test('Python and Edge agree on local metadata and complete public records across Houston cases',()=>{
+ const criteria={...config().criteria,required_location_scope:'houston_metro'};
+ const inputs=houstonCases.map(entry=>({job:parseFeed(config().sources[0],{jobs:[row({location:{name:entry.location},country:entry.country,content:'Our company headquarters is in Houston, Texas.'})]}).jobs[0],criteria,checkedAt:'2026-11-02'}));
+ const python=spawnSync('python3',['-c',"import hashlib,json,runpy,sys\nw=runpy.run_path('automation/research_worker.py')\nitems=json.loads(sys.argv[1])\nvalues=[{'local':w['houston_metro_location'](i['job']),'record':w['screen_job'](i['job'],i['criteria'],i['checkedAt'])} for i in items]\nprint(json.dumps([hashlib.sha256(json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest() for v in values]))",JSON.stringify(inputs)],{cwd:new URL('..',import.meta.url),stdio:['ignore','pipe','pipe'],encoding:'utf8',timeout:10000});
+ assert.equal(python.status,0,python.stderr||String(python.error));
+ const expected=JSON.parse(python.stdout),canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+ inputs.forEach((input,index)=>assert.equal(createHash('sha256').update(JSON.stringify(canonical({local:houstonMetroLocation(input.job),record:screenJob(input.job,input.criteria,input.checkedAt)}))).digest('hex'),expected[index],input.job.location));
+});
+
 const dateCases = [
  ['Start date: June 1, 2027.','compatible'], ['Starting June 2027.','compatible'],
  ['Start date: 2027-05-01.','compatible'], ['Starting May 2027.','compatible'],

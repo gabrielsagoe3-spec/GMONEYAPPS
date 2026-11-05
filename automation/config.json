@@ -109,10 +109,15 @@
       "management trainee",
       "graduate business",
       "business rotational",
-      "leadership development program"
+      "leadership development program",
+      "customer service representative",
+      "customer service specialist",
+      "energy specialist"
     ],
     "preferred_locations": [
-      "Houston"
+      "Houston",
+      "Stafford",
+      "Sugar Land"
     ],
     "country": "US",
     "entry_level": true,
@@ -120,10 +125,11 @@
     "sponsorship_requirement_note": "Initial work must permit valid OPT/CPT where applicable to the role and dates; future H-1B sponsorship is required.",
     "start_window": "Available for full-time work from May 1, 2027 onward",
     "minimum_salary_usd": null,
-    "available_from": "2027-05-01"
+    "available_from": "2027-05-01",
+    "required_location_scope": "houston_metro"
   },
   "max_records": 30,
-  "max_excluded": 5,
+  "max_excluded": 0,
   "sources": [
     {
       "provider": "greenhouse",
@@ -152,8 +158,8 @@
     },
     {
       "provider": "lever",
-      "board": "wealthfront",
-      "name": "Wealthfront"
+      "board": "octoenergy",
+      "name": "Octopus Energy"
     }
   ]
 }

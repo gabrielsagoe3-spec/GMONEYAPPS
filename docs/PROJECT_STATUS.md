@@ -11,7 +11,7 @@
 
 The uploaded résumé is staged privately. Verified sign-in with its matching email imports the résumé and confirmed preferences without overwriting saved edits. Two private application drafts have been prepared from actual employer requirements and résumé facts. They require answers and eligibility/location checks and are not submissions.
 
-The private answer bank, scoped Windows connector credentials, application queue/leases and receipt ledger are implemented. The two existing drafts are queued for the Windows worker. The owner has eight confirmed contact/availability facts saved privately; missing authorization and relocation facts remain unknown. Nightly dashboard reporting is enabled for 8:00 PM America/Chicago with an active cloud scheduler.
+The private answer bank, scoped Windows connector credentials, application queue/leases and receipt ledger are implemented. Earlier Boston and Pacific Time Zone drafts are paused because the search now covers Houston-area jobs only. Confirmed contact, postal-code, location-scope and availability facts are saved privately; missing authorization facts remain unknown. Nightly dashboard reporting is enabled for 8:00 PM America/Chicago with an active cloud scheduler.
 
 The local stdio MCP and Windows browser adapters are supplied as an installable package. Actual computer access requires running that installer and registering the MCP in a supported local client. No Windows device has connected and no employer application has been submitted by this setup.
 

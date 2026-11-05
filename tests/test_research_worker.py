@@ -75,6 +75,65 @@ class FeedTests(unittest.TestCase):
         self.assertEqual(worker.parse_feed(GH, {"jobs": []}), ([], 0))
 
 
+class HoustonScopeTests(unittest.TestCase):
+    def test_named_local_metadata_is_required_and_ambiguous_places_need_texas(self):
+        accepted = [
+            "Houston", "Houston, TX", "Greater Houston Area", "Houston, Texas, United States",
+            "Stafford, TX", "Sugar Land", "Sugar Land, TX", "Missouri City, Texas",
+            "Rosenberg, TX", "Pearland, TX", "Katy, TX", "Cypress, TX", "Spring, TX",
+            "The Woodlands, TX", "Humble, TX", "Pasadena, TX", "Richmond, TX", "Bellaire, TX",
+            "League City, TX", "Fort Bend County, TX", "Harris County, TX",
+            "Remote — Houston, TX", "Houston / Sugar Land, TX", "United States - Texas - Katy",
+        ]
+        rejected = [
+            "Houston, MS", "Houston Street, New York", "500 Houston St, Austin, TX",
+            "Spring, NY", "Cypress, CA", "Richmond, VA", "Stafford, VA", "Pasadena, CA",
+            "Springfield, TX", "Sugar Land Road, Dallas, TX", "Remote US", "Remote Texas",
+            "United States", "Texas", "Houston, TX / Boston, MA", "HQ: Houston, TX",
+            "Remote US (Houston office)", "Houston County, TX", "Stafford", "Spring", "Cypress",
+            "Houston, TX / Remote US", "Houston, TX / London, UK",
+        ]
+        criteria = {**config()["criteria"], "required_location_scope": "houston_metro"}
+        for location in accepted:
+            with self.subTest(location=location):
+                candidate = job(location=location)
+                self.assertTrue(worker.houston_metro_location(candidate))
+                record = worker.screen_job(candidate, criteria, NOW)
+                self.assertIsNotNone(record)
+                self.assertIn("Houston-area role location", record["fit"])
+                self.assertTrue(record["verificationRequired"])
+        for location in rejected:
+            with self.subTest(location=location):
+                candidate = job(location=location, content="Our company headquarters is in Houston, Texas.")
+                self.assertFalse(worker.houston_metro_location(candidate))
+                self.assertIsNone(worker.screen_job(candidate, criteria, NOW))
+        self.assertFalse(worker.houston_metro_location({**job(), "country": "CA"}))
+
+    def test_legacy_search_without_required_scope_keeps_other_us_leads(self):
+        self.assertIsNotNone(worker.screen_job(job(location="Boston, MA"), config()["criteria"], NOW))
+        self.assertIsNotNone(worker.screen_job(job(location="Remote US"), config()["criteria"], NOW))
+        bad = config(); bad["criteria"]["required_location_scope"] = "anywhere"
+        with self.assertRaises(ValueError):
+            worker.validate_config(bad)
+
+    def test_scoped_reports_never_show_nonlocal_excluded_examples(self):
+        cfg = config(); cfg["criteria"]["required_location_scope"] = "houston_metro"
+        rows = {"jobs": [gh_row(1, location="Boston, MA", content="No visa sponsorship is available."),
+                         gh_row(2, location="Stafford, TX"), gh_row(3, location="Remote US")]}
+        with patch.object(worker, "fetch_json", return_value=rows):
+            report = worker.run_research(cfg)
+        self.assertEqual([r["id"] for r in report["records"]], ["greenhouse-example-2"])
+        self.assertIn("Houston metro only", report["scope"])
+        self.assertIn("Houston-area title-relevant", report["summary"])
+        self.assertNotIn("preferred", report["scope"])
+        self.assertIn("May 1, 2027", report["records"][0]["next"])
+        self.assertIn("future H-1B sponsorship", report["records"][0]["next"])
+        with patch.object(worker, "fetch_json", return_value={"jobs": [gh_row(location="Remote US")]}):
+            empty = worker.run_research(cfg)
+        self.assertEqual(empty["records"], [])
+        self.assertEqual(empty["automation"]["status"], "completed")
+
+
 class ScreeningTests(unittest.TestCase):
     def test_only_explicit_work_start_dates_are_ranked_with_source_quotes(self):
         criteria = config()["criteria"]
@@ -192,7 +251,8 @@ class ScreeningTests(unittest.TestCase):
         self.assertTrue(criteria["sponsorship_required"])
         self.assertIn("valid OPT/CPT where applicable", criteria["sponsorship_requirement_note"])
         self.assertIn("future H-1B sponsorship is required", criteria["sponsorship_requirement_note"])
-        self.assertEqual(criteria["preferred_locations"], ["Houston"])
+        self.assertEqual(criteria["preferred_locations"], ["Houston", "Stafford", "Sugar Land"])
+        self.assertEqual(criteria["required_location_scope"], "houston_metro")
 
     def test_broad_business_search_does_not_select_technical_or_senior_roles(self):
         criteria = json.loads((ROOT / "automation" / "config.json").read_text())["criteria"]
