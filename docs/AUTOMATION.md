@@ -2,13 +2,13 @@
 
 The production worker is a Supabase Edge Function scheduled by pg_cron every six hours. It keeps running independently of this chat. It uses scoped publication credentials; the seven-day setup token is not required for scheduled execution. No GitHub Actions secret is needed.
 
-The confirmed search is for business roles, Houston preferred with wider U.S. locations considered, sponsorship needed, and full-time availability from May 1, 2027 onward. Public configuration is in `automation/config.json`. Profile edits do not yet update this configuration automatically; changes confirmed in chat can be deployed with the administration helper.
+The confirmed search is for business roles in the Houston metropolitan area only, including Houston, Stafford and Sugar Land, sponsorship needed, and full-time availability from May 1, 2027 onward. Generic U.S./Texas remote jobs and other locations are omitted unless the employer location explicitly identifies a local role. The home postal code stays in the private answer bank and profile. Public configuration is in `automation/config.json`. Profile edits do not yet update this configuration automatically; changes confirmed in chat can be deployed with the administration helper.
 
 ## What works
 
 The hosted worker has completed live manual and automatic runs. A verified run retrieved 1,110 postings from all six feeds, screened 208 title-relevant records and recorded 30 leads under the display limit. Repeated runs correctly reported existing selected jobs as not new. Counts change with employer feeds; consult the dashboard for current evidence.
 
-The source feeds are SoFi, Affirm, Datadog, HubSpot, Palantir and Wealthfront on Greenhouse/Lever. Matching is transparent rule-based screening, not a full résumé assessment. Unknown sponsorship and start dates remain verification tasks. The worker does not access LinkedIn/Indeed accounts or submit applications.
+The source feeds are SoFi, Affirm, Datadog, HubSpot, Palantir and Octopus Energy on Greenhouse/Lever. The hosted worker permits six feeds per run to bound runtime. Matching is transparent rule-based screening, not a full résumé assessment. This is limited employer coverage, not a complete Houston job search. Unknown sponsorship and start dates remain verification tasks. The research worker does not access LinkedIn/Indeed accounts or submit applications.
 
 Start-date screening compares explicit work-start wording with `criteria.available_from`. Compatible date evidence raises a lead's rank; earlier generic or immediate starts lower it. Only a clear mandatory earlier start excludes a role. Ambiguous dates, flexible timing, conflicting cues and future start deadlines remain unverified. Posting, application-deadline, graduation and benefit dates do not establish a work start. A cohort year in a title is only a weak, labeled signal. Date evidence and short employer quotes stay in the existing fit explanations; they do not verify graduation eligibility or work authorization.
 

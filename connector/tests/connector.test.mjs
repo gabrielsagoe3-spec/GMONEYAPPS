@@ -8,7 +8,7 @@ import {chromium} from 'playwright';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {applicationTarget,allowedNavigation,performApplication} from '../src/browser.mjs';
-import {answerFor,questionKey} from '../src/answers.mjs';
+import {answerFor,blockedQuestion,questionKey} from '../src/answers.mjs';
 import {ConnectorApi} from '../src/api.mjs';
 import {runNext} from '../src/runner.mjs';
 import {notifyLatestReport} from '../src/notify.mjs';
@@ -37,6 +37,15 @@ test('custom answers are job-scoped; authorization, demographics and inverse spo
  assert.equal(answerFor(question,bank,'job-b'),null);
  for(const q of ['Are you legally authorized to work in the United States?','Do you currently require sponsorship?','Do you not require sponsorship?','Gender'])assert.equal(answerFor(q,bank,'job-a'),null,q);
  assert.equal(answerFor('Will you now or in the future require visa sponsorship?',bank,'job-a').answer,'Yes');
+});
+test('approved postal code is reusable only for exact ZIP and postal-code labels',()=>{
+ const bank=[{key:'postal_code',question:'Postal code',answer:'12345'}];
+ for(const label of ['ZIP','ZIP code','ZIPcode','Postal code','Postalcode']) {
+  for(const scope of ['job-a','job-b'])assert.deepEqual(answerFor(label,bank,scope),{key:'postal_code',answer:'12345'});
+  assert.equal(answerFor(label,[], 'job-a'),null,'a ZIP is never inferred without an approved answer');
+  assert.equal(blockedQuestion(label,undefined,'job-a').key,'postal_code');
+ }
+ for(const label of ['City','Street address','Home address','Employer ZIP code','ZIP code of your previous employer','Are you legally authorized to work in the United States?'])assert.equal(answerFor(label,bank,'job-a'),null,label);
 });
 test('hidden résumé input is filled and the checkpoint precedes a single confirmed employer submission',async()=>{
  const page=await pageFor(html());let checkpoint=false;

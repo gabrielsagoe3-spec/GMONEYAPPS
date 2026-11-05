@@ -58,6 +58,8 @@ def main():
             print(json.dumps({k:result.get(k) for k in ['slug','status','version']}))
         elif args.action=='sync-config':
             research=json.loads((ROOT/'automation/config.json').read_text())
+            if not isinstance(research.get('sources'),list) or not 1<=len(research['sources'])<=6:
+                raise RuntimeError('The hosted worker supports between one and six employer feeds per run.')
             api('/secrets',[{'name':'GMONEY_RESEARCH_CONFIG','value':json.dumps(research)}])
             print('Confirmed search configuration saved to the hosted worker.')
         elif args.action=='trigger':

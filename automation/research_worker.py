@@ -119,6 +119,8 @@ def validate_config(config: Any) -> dict[str, Any]:
         raise ValueError("criteria.role_patterns must contain nonempty title phrases.")
     if not isinstance(criteria.get("preferred_locations", []), list) or any(not isinstance(v, str) for v in criteria.get("preferred_locations", [])):
         raise ValueError("preferred_locations must be a list of names.")
+    if criteria.get("required_location_scope") not in (None, "houston_metro"):
+        raise ValueError("Unsupported required location scope.")
     for name in ("entry_level", "sponsorship_required"):
         if not isinstance(criteria.get(name), bool):
             raise ValueError(f"criteria.{name} must be a boolean.")
@@ -376,6 +378,45 @@ US_STATES = r"AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|
 NON_US = re.compile(r"\b(?:United Kingdom|UK|Canada|Germany|France|India|Ireland|Australia|Japan|Singapore|Brazil|Mexico|Poland|Netherlands|Spain|Italy|Israel|London|Toronto|Vancouver|Berlin|Paris|Dublin|Bengaluru|Bangalore|Hyderabad|Mumbai|Sydney|Melbourne|Tokyo|Warsaw|Amsterdam|Madrid|Tel Aviv)\b", re.I)
 
 
+HOUSTON_PLACES = re.compile(r"\b(?:The Woodlands|Missouri City|Sugar ?Land|League City|Fort Bend County|Harris County|Houston|Stafford|Rosenberg|Pearland|Katy|Cypress|Spring|Humble|Pasadena|Richmond|Bellaire)\b", re.I)
+
+
+def houston_metro_location(job: dict[str, Any]) -> bool:
+    """Require a named local role location; company prose cannot establish it.
+
+    This is conservative location metadata screening, not a commute estimate or
+    proof that an employer permits work from a candidate's home address.
+    """
+    country = job.get("country", "").strip().upper()
+    if country and country not in {"US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"}:
+        return False
+    location = job["location"].strip()
+    if re.search(r"\b(?:Houston\s+County|street|st|road|rd|avenue|ave|boulevard|blvd|drive|dr|headquarters|hq)\b", location, re.I):
+        return False
+    # A company office mentioned alongside a generic remote region does not
+    # establish that this particular remote position is Houston-based.
+    if re.search(r"\bremote\s*[,(/–—-]?\s*(?:US|USA|United States|Texas|TX)\b", location, re.I):
+        return False
+    places = list(HOUSTON_PLACES.finditer(location))
+    if not places:
+        return False
+    texas = bool(re.search(r"\b(?:TX|Texas)\b", location, re.I))
+    if not texas and any(not re.fullmatch(r"Houston|Sugar ?Land", place.group(0), re.I) for place in places):
+        return False
+    remainder = HOUSTON_PLACES.sub(" ", location)
+    remainder = re.sub(r"\bU\.S\.(?:A\.)?", " ", remainder, flags=re.I)
+    remainder = re.sub(r"\b(?:United States(?: of America)?|USA?|Texas|TX|greater|metropolitan|metro|area|remote|hybrid|on[ -]?site|in[ -]office|office|work from home|downtown|uptown|north|south|east|west|central|northeast|northwest|southeast|southwest|heights|galleria|energy corridor|memorial|medical center)\b", " ", remainder, flags=re.I)
+    # Unknown cities/states, alternatives, street addresses and other context
+    # remain unverified rather than being inferred from a substring match.
+    return not bool(re.search(r"[\w]", remainder))
+
+
+def location_scope_text(criteria: dict[str, Any]) -> str:
+    if criteria.get("required_location_scope") == "houston_metro":
+        return "Houston metro only: Houston, Stafford, Sugar Land and nearby named Houston-area locations. Generic U.S./Texas remote and other locations are omitted unless the role explicitly lists a named local location. "
+    return "U.S. locations with " + (", ".join(criteria.get("preferred_locations", [])) or "no specific city") + " preferred. "
+
+
 def geography(job: dict[str, Any]) -> str:
     country = job.get("country", "").strip().upper()
     if country in {"US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"}:
@@ -396,6 +437,8 @@ def geography(job: dict[str, Any]) -> str:
 
 
 def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -> dict[str, Any] | None:
+    if criteria.get("required_location_scope") == "houston_metro" and not houston_metro_location(job):
+        return None
     title = job["title"]
     title_lower = title.casefold()
     matched = [phrase for phrase in criteria["role_patterns"] if phrase.casefold() in title_lower]
@@ -407,6 +450,8 @@ def screen_job(job: dict[str, Any], criteria: dict[str, Any], checked_at: str) -
         return None
     score, exclusions, reasons = 30, [], []
     reasons.append(f"Title matches the configured '{matched[0]}' role family.")
+    if criteria.get("required_location_scope") == "houston_metro":
+        reasons.append("The employer location field names a Houston-area role location; exact work-location conditions still need review.")
     # Account/Customer Success Manager commonly names an individual-contributor
     # business role; Staff Accountant is also not a seniority designation.
     # Explicit Senior/Lead/etc. markers and experience requirements still apply.
@@ -557,11 +602,12 @@ def run_research(config: dict[str, Any], *, trigger: str = "manual", previous: d
     verify = sum(r["category"] == "verify" for r in records)
     excluded = len(records) - verify
     partial = " Some employer feeds failed; this is a partial search." if automation["status"] == "partial" else ""
+    relevance = "Houston-area title-relevant" if config["criteria"].get("required_location_scope") == "houston_metro" else "title-relevant"
     return {
         "updatedAt": started[:10],
         "mode": "Automated employer-feed research; applications require review",
-        "scope": ("Search criteria: " + str(config["criteria"].get("label", "configured title families")) + "; U.S. locations with " + (", ".join(config["criteria"].get("preferred_locations", [])) or "no specific city") + " preferred. " + ("Sponsorship required. " if config["criteria"]["sponsorship_required"] else "Sponsorship is recorded without being an exclusion. ") + (config["criteria"].get("sponsorship_requirement_note", "").strip() + " " if config["criteria"].get("sponsorship_requirement_note", "").strip() else "") + str(config["criteria"].get("start_window", "Start window is not confirmed.")) + ". Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed."),
-        "summary": f"Automatically retrieved {len(jobs)} job records from {successes} of {len(config['sources'])} employer feeds. Selected {verify} leads for verification and {excluded} excluded examples; {automation['stats']['relevant']} title-relevant records were screened before display limits. No candidate résumé was evaluated and no applications were submitted." + partial,
+        "scope": ("Search criteria: " + str(config["criteria"].get("label", "configured title families")) + ". " + location_scope_text(config["criteria"]) + ("Sponsorship required. " if config["criteria"]["sponsorship_required"] else "Sponsorship is recorded without being an exclusion. ") + (config["criteria"].get("sponsorship_requirement_note", "").strip() + " " if config["criteria"].get("sponsorship_requirement_note", "").strip() else "") + str(config["criteria"].get("start_window", "Start window is not confirmed.")) + ". Employer start-date compatibility still requires verification. This run covers only the configured employer feeds, not LinkedIn or Indeed."),
+        "summary": f"Automatically retrieved {len(jobs)} job records from {successes} of {len(config['sources'])} employer feeds. Selected {verify} leads for verification and {excluded} excluded examples; {automation['stats']['relevant']} {relevance} records were screened before display limits. No candidate résumé was evaluated and no applications were submitted." + partial,
         "records": records,
         "additionalSources": [{"title": source["name"] + " — public " + source["provider"] + " feed", "url": source["url"], "note": (f"Retrieved {source['fetched']} records in this run." if source["status"] == "ok" else "Could not retrieve this feed: " + source["error"])} for source in automation["sources"]],
         "automation": automation,
